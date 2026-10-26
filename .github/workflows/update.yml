@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["fetch.py", "build.py", "template.html", "data/events.json", ".github/workflows/**"]
+    paths: ["fetch.py", "fetch_india.py", "build.py", "template.html", "data/events.json", ".github/workflows/**"]
 
 permissions:
   contents: write
@@ -48,7 +48,7 @@ jobs:
         run: |
           git config user.name "macro-lens-bot"
           git config user.email "macro-lens-bot@users.noreply.github.com"
-          git add data/fii_dii_history.csv data/nse_category_daily.csv data/nse_index_closes.csv data/series_cache.json
+          git add data/fii_dii_history.csv data/nse_category_daily.csv data/nse_index_closes.csv data/series_cache.json data/rbi_sectoral_credit.csv data/rbi_sectoral_releases.json data/nse_tri.csv
           if git diff --cached --quiet; then echo "No new data"; else git commit -m "Data: daily update $(date -u +%Y-%m-%d)" && git push; fi
 
       - name: Build site

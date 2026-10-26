@@ -718,6 +718,7 @@ def fetch_mcap_gdp(daily):
         s = nse_session()
         mc = s.get("https://www.nseindia.com/api/marketStatus", timeout=30).json()["marketcap"]
         mcap_now = float(mc["marketCapinCRRupees"])
+        EXTRA["nse_mcap_cr"] = mcap_now
         gdp_q = EXTRA.get("in_gdp_q")
         idx = daily.get("^CRSLDX")
         if gdp_q is not None and idx is not None:
@@ -811,6 +812,7 @@ def fetch_sectors():
             lst["mcap"] = list(ex.map(cap, lst["Symbol"].str.strip()))
         lst = lst.dropna(subset=["mcap"])
         lst["group"] = lst["Industry"].map(SECTOR_IN).fillna("Other")
+        EXTRA["n500_mcap"] = dict(zip(lst["Symbol"].str.strip() + ".NS", lst["mcap"]))
         ind = lst.groupby("group")["mcap"].sum()
         ind = ind / ind.sum() * 100
         out["india"] = {g: round(float(ind.get(g, 0.0)), 2) for g in SECTOR_US}
@@ -1038,7 +1040,62 @@ def fetch_breadth():
         "sectors": sector_rows,
         "above40w": to_points(a40, 1),
         "universe": int(close.shape[1]),
+        "stocks": stock_stats(close, hi52, lo52, ind),
     }
+
+
+def stock_stats(close, hi52, lo52, ind):
+    """Stock-level breadth for the Nifty 500: % positive and median return by horizon, the 1M return
+    distribution, distance from 52-week highs, size buckets, concentration and sector risk-return."""
+    close = close.iloc[-300:]
+    last = close.iloc[-1]
+    hz = {"1D": 1, "1W": 5, "1M": 21, "3M": 63, "6M": 126, "1Y": 252}
+    ret = {k: (last / close.iloc[-1 - n] - 1) * 100 for k, n in hz.items() if len(close) > n}
+    horizons = [{"h": k, "pos": round(float((r > 0).mean() * 100), 1), "median": round(float(r.median()), 1)}
+                for k, r in ret.items()]
+    # rolling % positive, last 6 months
+    roll = {}
+    for k in ["1D", "1W", "1M", "3M"]:
+        n = hz[k]
+        pos = ((close / close.shift(n) - 1) > 0).sum(axis=1) / close.shift(n).notna().sum(axis=1) * 100
+        roll[k] = to_points(pos.iloc[-126:], 1)
+    r1m = ret["1M"].dropna()
+    edges = list(range(-30, 35, 5))
+    hist_ = np.histogram(r1m.clip(-32.5, 32.5), bins=[-35] + edges + [35])[0]
+    dist_hi = ((last / hi52.iloc[-1] - 1) * 100).dropna()
+    buckets = [("< -50%", -999, -50), ("-50 to -30%", -50, -30), ("-30 to -20%", -30, -20), ("-20 to -10%", -20, -10),
+               ("-10 to -5%", -10, -5), ("-5 to -1%", -5, -1), ("Within 1%", -1, 1)]
+    near_hi = ((close / hi52.reindex(close.index) - 1) >= -0.02).sum(axis=1).iloc[-126:]
+    near_lo = ((close / lo52.reindex(close.index) - 1) <= 0.02).sum(axis=1).iloc[-126:]
+    mcap = pd.Series(EXTRA.get("n500_mcap", {})).reindex(close.columns).dropna().sort_values(ascending=False)
+    size = []
+    for nm, a, b in [("Large (1-100)", 0, 100), ("Mid (101-250)", 100, 250), ("Small (251-500)", 250, 500)]:
+        r = r1m.reindex(mcap.index[a:b]).dropna()
+        if len(r):
+            size.append({"bucket": nm, "mean": round(float(r.mean()), 1), "median": round(float(r.median()), 1), "n": int(len(r))})
+    conc = None
+    if len(mcap) and EXTRA.get("nse_mcap_cr"):
+        tot = EXTRA["nse_mcap_cr"] * 1e7
+        conc = [{"n": n, "share": round(float(mcap.iloc[:n].sum() / tot * 100), 1)} for n in (10, 20, 50, 100, 200, 500) if n <= len(mcap)]
+    tb = r1m.sort_values()
+    top_bottom = {"top": [{"s": s.replace(".NS", ""), "r": round(float(v), 1)} for s, v in tb.iloc[::-1][:10].items()],
+                  "bottom": [{"s": s.replace(".NS", ""), "r": round(float(v), 1)} for s, v in tb[:10].items()]}
+    risk = []
+    daily = close.pct_change().iloc[-63:]
+    for sec, cols in pd.Series(ind).groupby(lambda t: ind[t]).groups.items():
+        cols = [c for c in cols if c in daily.columns and c in mcap.index]
+        if len(cols) < 3:
+            continue
+        w = mcap[cols] / mcap[cols].sum()
+        idx = (daily[cols].fillna(0) * w).sum(axis=1)
+        risk.append({"sector": sec, "ret3m": round(float(((1 + idx).prod() - 1) * 100), 1),
+                     "vol": round(float(idx.std() * np.sqrt(252) * 100), 1), "mcap": round(float(mcap[cols].sum() / 1e12), 2), "n": len(cols)})
+    return {"asof": close.index[-1].strftime("%d %b %Y"), "horizons": horizons, "rolling": roll,
+            "hist": {"edges": edges, "counts": [int(x) for x in hist_], "median": round(float(r1m.median()), 1),
+                     "mean": round(float(r1m.mean()), 1), "pos": round(float((r1m > 0).mean() * 100), 1)},
+            "dist_hi": [{"b": nm, "n": int(((dist_hi > a) & (dist_hi <= b)).sum())} for nm, a, b in buckets],
+            "near": {"dates": [d.strftime("%Y-%m-%d") for d in near_hi.index], "hi": [int(x) for x in near_hi], "lo": [int(x) for x in near_lo]},
+            "size": size, "concentration": conc, "top_bottom": top_bottom, "risk": risk}
 
 
 # --------------------------------------------------------------------------- main
@@ -1049,6 +1106,7 @@ def main():
     fetch_eia()
     daily = fetch_yahoo()
     gold_px = float(daily["GC=F"].dropna().iloc[-1]) if "GC=F" in daily else None
+    import fetch_india as FI
     nse = None
     try:
         nse = fetch_nse_indices()
@@ -1057,7 +1115,9 @@ def main():
     for name, fn in [("gold", lambda: fetch_imf(gold_px)), ("mospi", fetch_mospi), ("flows", fetch_flows),
                      ("category", fetch_nse_category), ("fpi", fetch_nsdl_fpi), ("ratios", lambda: fetch_ratios(daily, nse)),
                      ("banking", fetch_banking), ("mcap", lambda: fetch_mcap_gdp(daily)), ("sectors", fetch_sectors),
-                     ("repo", fetch_repo), ("breadth", fetch_breadth)]:
+                     ("repo", fetch_repo), ("breadth", fetch_breadth),
+                     ("credit", FI.fetch_rbi_credit), ("cpi", FI.fetch_cpi_detail), ("indices", FI.fetch_nse_tri),
+                     ("bop", FI.fetch_bop)]:
         try:
             steps[name] = fn()
         except Exception as e:  # noqa: BLE001
@@ -1082,6 +1142,9 @@ def main():
         "breadth": steps["breadth"],
         "category": steps["category"],
         "sectors": steps["sectors"],
+        "credit": steps["credit"],
+        "cpi": steps["cpi"],
+        "indices": steps["indices"],
         "log": LOG,
     }
     (DATA / "macro.json").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
@@ -1090,4 +1153,5 @@ def main():
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
-    main()
+    import fetch  # run through the importable module so fetch_india shares SERIES / EXTRA with it
+    fetch.main()

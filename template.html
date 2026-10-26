@@ -263,7 +263,22 @@ const TABS = [
     {t: "Nifty in US dollars", s: [R("Y:^NSEI", "Y:USDINR=X", "Nifty 50 in USD")], why: "How a foreign investor sees Indian equity returns."},
   ]},
   {id: "breadth", label: "India breadth", lede: "Nifty 500 participation, computed each week from daily prices. India is a bottom-up market, so breadth tells you more than the index."},
+  {id: "inflation", label: "Inflation detail"},
+  {id: "credit", label: "Bank credit (RBI)"},
+  {id: "returns", label: "Market returns"},
   {id: "flows", label: "FII / DII flows"},
+  {id: "bop", label: "Current account", lede: "RBI's quarterly balance of payments (as reported to the IMF, USD bn). Gold is a capital-like import booked as goods, so the current account excluding gold shows the underlying position.", cards: [
+    {t: "Current account balance vs excluding gold", s: ["BOP_CAB", "BOP_CAB_XGOLD"], kind: "bar", why: "Net of gold imports, India has run a surplus in most recent quarters."},
+    {t: "Current account balance (% of GDP, last 4 quarters)", s: ["BOP_CAB_GDP"], kind: "bar", ref: 0, why: "Above about -2.5% of GDP is usually seen as comfortable for the rupee."},
+    {t: "Net gold imports", s: ["BOP_GOLD"], kind: "bar"},
+    {t: "Goods vs services balance", s: ["BOP_GOODS", "BOP_SERVICES"], kind: "bar", why: "Services surplus (mostly IT) offsets a large goods deficit."},
+    {t: "Trade deficit (goods and services)", s: ["BOP_GS"], kind: "bar"},
+    {t: "Goods exports vs imports", s: ["BOP_GOODS_X", "BOP_GOODS_M"]},
+    {t: "Computer services exports (telecom, computer and information)", s: ["BOP_SOFTWARE"], kind: "bar", why: "India's software export engine; a big share goes to the US."},
+    {t: "Computer services exports growth", s: ["BOP_SOFTWARE_YOY"], ref: 0},
+    {t: "Remittances and other transfers (net)", s: ["BOP_REMIT"], kind: "bar", why: "Mostly money sent home by Indians working abroad."},
+    {t: "Net FDI vs net FPI inflows", s: ["BOP_FDI", "BOP_FPI"], kind: "bar", why: "Positive = money coming into India."},
+  ]},
   {id: "value", label: "Valuation and ratios", lede: "Market cap to GDP and relative-value ratios. Each chart shows the median and ±1σ / ±2σ bands over the range you pick, so you can see whether today is stretched against history.", cards: [
     {t: "India market cap to GDP (World Bank, annual)", s: ["IN_MCAP_GDP_WB"], why: "Official annual series. Values far above the median have preceded weak multi-year returns (2007, 2021)."},
     {t: "India market cap to GDP (recent estimate)", s: ["IN_MCAP_GDP"], bands: false, why: "NSE's total market cap scaled back with the Nifty 500, over trailing four-quarter nominal GDP. Use it for direction, not precision."},
@@ -579,6 +594,192 @@ function sectorsPanel(p) {
     }, true));
   }
 }
+// ---------- heat-table colouring: diverging around a centre, warm = bad side
+function heatStyle(v, centre, lim, highIsGood) {
+  if (v == null || isNaN(v)) return "";
+  const t = Math.max(-1, Math.min(1, (v - centre) / (lim || 1)));
+  const good = css("--s1"), bad = css("--s3");
+  const col = (t > 0) === !!highIsGood ? good : bad;
+  return `background:color-mix(in srgb, ${col} ${Math.round(Math.abs(t) * 55)}%, var(--heat0))`;
+}
+const pctCell = (v, style) => `<td style="${style || ""}">${v == null ? "n/a" : fmt(v, 1) + "%"}</td>`;
+const ptsSpec = (dates, vals, name, unit, src) => ({d: "pts", pts: dates.map((d, i) => [new Date(d).getTime(), vals[i]]).filter(x => x[1] != null), name, unit, src});
+
+// ---------- RBI sector-wise bank credit
+const CREDIT_TREE = [
+  ["Non-food credit", 0], ["Agriculture", 0], ["Industry", 0], ["Micro and small", 1], ["Medium", 1], ["Large", 1],
+  ["Services", 0], ["Transport operators", 1], ["Computer software", 1], ["Tourism, hotels and restaurants", 1], ["Shipping", 1],
+  ["Aviation", 1], ["Professional services", 1], ["Trade", 1], ["Wholesale trade", 2], ["Retail trade", 2],
+  ["Commercial real estate", 1], ["NBFCs", 1], ["Other services", 1], ["Personal loans", 0], ["Consumer durables", 1],
+  ["Housing", 1], ["Loans against FD", 1], ["Loans against shares", 1], ["Credit cards", 1], ["Education", 1],
+  ["Vehicle loans", 1], ["Gold loans", 1], ["Other personal loans", 1]];
+function creditPanel(p) {
+  const C = D.credit;
+  if (!C) { p.innerHTML = `<p class="lede">RBI credit data was not available in this run.</p>`; return; }
+  const n = C.dates.length, cols = Math.min(13, n), idx = [...Array(cols).keys()].map(k => n - 1 - k);
+  const mlab = i => new Date(C.dates[i]).toLocaleDateString("en-GB", {month: "short", year: "2-digit"});
+  p.innerHTML = `<div class="bar"><div><h2>Bank credit by sector</h2><p class="lede">RBI's monthly Sectoral Deployment of Bank Credit, ${mlab(0)} to ${mlab(n - 1)}. Growth is year on year, computed from each release's own year-ago column so changes in bank coverage do not distort it. July 2023 to June 2024 includes the HDFC merger.</p></div>${rangeBar()}</div>
+  <h4 class="sec">Growth heat map (YoY %, greener = faster than the row's own recent range)</h4><div class="tw"><table id="crT"></table></div>
+  <h4 class="sec">Growth by sector</h4><div class="grid" id="crG"></div>`;
+  let h = `<thead><tr><th>Sector</th>${idx.map(i => `<th>${mlab(i)}</th>`).join("")}<th>Outstanding (INR lakh cr)</th></tr></thead><tbody>`;
+  for (const [s, depth] of CREDIT_TREE) {
+    const y = C.yoy[s]; if (!y) continue;
+    const vals = idx.map(i => y[i]).filter(v => v != null), med = vals.length ? [...vals].sort((a, b) => a - b)[Math.floor(vals.length / 2)] : 0;
+    const lim = Math.max(1, ...vals.map(v => Math.abs(v - med)));
+    const lvl = (C.value[s] || [])[n - 1];
+    h += `<tr><td style="padding-left:${10 + depth * 16}px;${depth ? "" : "font-weight:500"}">${s}</td>${idx.map(i => pctCell(y[i], heatStyle(y[i], med, lim, true))).join("")}<td>${lvl == null ? "n/a" : fmt(lvl / 1e5, 2)}</td></tr>`;
+  }
+  $("#crT", p).innerHTML = h + "</tbody>";
+  const g = $("#crG", p);
+  ["Non-food credit", "Agriculture", "Industry", "Services", "Personal loans", "Micro and small", "Medium", "Large", "NBFCs",
+   "Credit cards", "Gold loans", "Housing", "Vehicle loans", "Computer software", "Commercial real estate", "Consumer durables"].forEach(s => {
+    if (!C.yoy[s]) return;
+    g.appendChild(card({t: `${s}: credit growth`, s: [ptsSpec(C.dates, C.yoy[s], s + " (% YoY)", "% YoY", "RBI")], ref: 0}));
+  });
+  g.appendChild(customCard("Outstanding credit by sector", "Pick a sector. INR lakh crore; breaks in the level reflect changes in bank coverage (use the growth charts for trends).", "RBI", 280, (ch, div) => {
+    const ctl = div.querySelector(".ctl");
+    if (!ctl.firstChild) { ctl.innerHTML = `<select aria-label="Sector">${CREDIT_TREE.filter(([s]) => C.value[s]).map(([s]) => `<option${s === "Gold loans" ? " selected" : ""}>${s}</option>`).join("")}</select>`; ctl.firstChild.onchange = () => div._card.custom(div._card.el); }
+    const s = ctl.firstChild.value, o = baseOpt(); o.grid.top = 10; o.yAxis.scale = false;
+    o.series = [{type: "line", name: s, showSymbol: false, areaStyle: {color: css("--s1"), opacity: .16}, lineStyle: {width: 2, color: css("--s1")}, itemStyle: {color: css("--s1")},
+      data: C.dates.map((d, i) => [new Date(d).getTime(), C.value[s][i] == null ? null : C.value[s][i] / 1e5]).filter(x => x[1] != null)}];
+    ch.setOption(o, true);
+  }, true));
+}
+
+// ---------- inflation detail
+function inflationPanel(p) {
+  const P = D.cpi || {};
+  p.innerHTML = `<div class="bar"><div><h2>Inflation detail</h2><p class="lede">MOSPI's new CPI (base 2024) by division and group, the older 2012-base series to Dec 2025, core CPI computed from official weights (food and beverages 36.75%, fuel about 5.4%), and the base effect.</p></div>${rangeBar()}</div>
+  <div class="grid" id="inG"></div>
+  <h4 class="sec">CPI by division and group, base 2024 (YoY %)</h4><div class="tw"><table id="in24"></table></div>
+  <h4 class="sec">CPI by group and sub-group, base 2012 (YoY %, series ended Dec 2025)</h4><div class="tw"><table id="in12"></table></div>`;
+  const g = $("#inG", p), idx = raw("IN_CPI_INDEX");
+  if (idx) {
+    const back = idx.map(([t, v]) => [new Date(new Date(t).setFullYear(new Date(t).getFullYear() + 1)).getTime(), v]);
+    g.appendChild(card({t: "Base effect: CPI index vs the same index one year earlier", s: [{d: "pts", pts: idx, name: "CPI index", src: "MOSPI"}, {d: "pts", pts: back, name: "CPI one year back", src: "MOSPI"}],
+      why: "The gap between the lines is inflation. The second line runs 12 months ahead, so you can see next year's base: a high base ahead means low reported inflation even if prices keep rising."}));
+  }
+  g.appendChild(card({t: "Headline vs core CPI", s: ["IN_CPI", "IN_CORE_CPI"], ref: 4, why: "Core removes food, beverages and fuel. RBI's target is 4% (dashed)."}));
+  g.appendChild(card({t: "Core CPI (excluding food, beverages and fuel)", s: ["IN_CORE_CPI"], refLabel: "Target", ref: 4}));
+  g.appendChild(card({t: "Food and beverages inflation", s: ["IN_CPI_FOOD"], kind: "bar"}));
+  if (P.components) {
+    g.appendChild(customCard("CPI divisions: YoY change at four points in time", "Bar length = inflation; brackets show each division's weight in the basket.", "MOSPI", 420, ch => {
+      const C = P.components, o = baseOpt(), rows = C.rows.slice().reverse();
+      o.grid = {left: 8, right: 16, top: 26, bottom: 4, containLabel: true}; o.tooltip.trigger = "axis"; o.tooltip.axisPointer = {type: "shadow"};
+      o.legend = {top: 0, left: 0, itemWidth: 12, itemHeight: 8, textStyle: {color: css("--muted"), fontSize: 11}};
+      o.xAxis = {type: "value", axisLabel: {color: css("--muted"), fontSize: 11, formatter: v => v + "%"}, splitLine: {lineStyle: {color: css("--grid")}}};
+      o.yAxis = {type: "category", data: rows.map(r => `${r.label.split(",")[0]} (${r.weight})`), axisLabel: {color: css("--muted"), fontSize: 10, width: 170, overflow: "truncate"}, axisTick: {show: false}};
+      o.series = C.months.map((m, k) => ({name: m, type: "bar", barMaxWidth: 7, itemStyle: {color: css(SCOL[k % 4]), borderRadius: [0, 3, 3, 0]}, data: rows.map(r => r.values[k] == null ? null : +r.values[k].toFixed(2))}));
+      ch.setOption(o, true);
+    }, true));
+  }
+  const tableHTML = T => {
+    let h = `<thead><tr><th>Component</th>${T.months.map(m => `<th>${m}</th>`).join("")}</tr></thead><tbody>`;
+    for (const r of T.rows) h += `<tr><td style="padding-left:${10 + r.depth * 16}px;${r.depth ? "" : "font-weight:500"}">${r.label}</td>${r.values.map(v => pctCell(v, heatStyle(v, 4, 6, false))).join("")}</tr>`;
+    return h + "</tbody>";
+  };
+  if (P.cpi24) $("#in24", p).innerHTML = tableHTML(P.cpi24);
+  if (P.cpi12) $("#in12", p).innerHTML = tableHTML(P.cpi12);
+}
+
+// ---------- market returns: index table and monthly heat maps
+function returnsPanel(p) {
+  const I = D.indices;
+  if (!I) { p.innerHTML = `<p class="lede">Index history was not available in this run.</p>`; return; }
+  const keys = Object.keys(I.heat || {});
+  p.innerHTML = `<div class="bar"><div><h2>Market returns</h2><p class="lede">Total-return indices from NSE Indices (dividends included). Returns over 1 year are annualised; DD is the current drawdown from the all-time high.</p></div></div>
+  <h4 class="sec">Index returns (%)</h4><div class="tw"><table id="rtT"></table></div>
+  <h4 class="sec">Monthly returns heat map</h4><div class="ctl" id="rtSel"></div><div class="tw"><table id="rtH"></table></div>`;
+  const cols = ["mtd", "3M", "6M", "1Y", "3Y", "5Y", "7Y", "10Y", "dd"], lab = {mtd: "This month", dd: "DD"};
+  let h = `<thead><tr><th>Index</th>${cols.map(c => `<th>${lab[c] || c}</th>`).join("")}</tr></thead><tbody>`;
+  const colStats = Object.fromEntries(cols.map(c => { const v = I.table.map(r => r[c]).filter(x => x != null); const m = v.reduce((a, b) => a + b, 0) / (v.length || 1); return [c, [m, Math.max(1, ...v.map(x => Math.abs(x - m)))]]; }));
+  for (const r of I.table) h += `<tr><td>${r.index}</td>${cols.map(c => pctCell(r[c], heatStyle(r[c], colStats[c][0], colStats[c][1], true))).join("")}</tr>`;
+  $("#rtT", p).innerHTML = h + `</tbody>`;
+  const sel = $("#rtSel", p);
+  sel.innerHTML = `<select aria-label="Index">${keys.map(k => `<option>${k}</option>`).join("")}</select>`;
+  const drawHeat = () => {
+    const H = I.heat[sel.firstChild.value], M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const cell = (v, lim) => pctCell(v, heatStyle(v, 0, lim, true));
+    let t = `<thead><tr><th></th>${M.map(m => `<th>${m}</th>`).join("")}<th>Annual</th></tr></thead><tbody>`;
+    t += `<tr class="grp"><td>Median</td>${H.median.map(v => cell(v, 6)).join("")}${cell(H.ann_stats[0], 40)}</tr>`;
+    t += `<tr><td>SD</td>${H.sd.map(v => `<td>${fmt(v, 1)}%</td>`).join("")}<td>${fmt(H.ann_stats[1], 1)}%</td></tr>`;
+    t += `<tr><td>Average</td>${H.avg.map(v => cell(v, 6)).join("")}${cell(H.ann_stats[2], 40)}</tr>`;
+    H.years.forEach((y, k) => { t += `<tr><td>${y}</td>${H.grid[k].map(v => cell(v, 10)).join("")}${cell(H.annual[k], 40)}</tr>`; });
+    $("#rtH", p).innerHTML = t + "</tbody>";
+  };
+  sel.firstChild.onchange = drawHeat; drawHeat();
+}
+
+// ---------- stock-level breadth (appended to the breadth tab)
+function stockBreadth(p) {
+  const S = D.breadth && D.breadth.stocks;
+  if (!S) return;
+  const sec = document.createElement("div");
+  sec.innerHTML = `<h4 class="sec">Stock-level breadth, Nifty 500 (as of ${S.asof})</h4><div class="grid" id="sbG"></div>`;
+  p.appendChild(sec);
+  const g = $("#sbG", sec), src = "NSE list, Yahoo prices (computed)";
+  const catBar = (title, why, cats, series, h, opts = {}) => customCard(title, why, src, h || 260, ch => {
+    const o = baseOpt(); o.tooltip.trigger = "axis"; o.tooltip.axisPointer = {type: "shadow"};
+    o.xAxis = {type: "category", data: cats, axisLabel: {color: css("--muted"), fontSize: 11, interval: 0, rotate: opts.rotate || 0}, axisTick: {show: false}, axisLine: {lineStyle: {color: css("--line")}}};
+    o.yAxis.scale = false;
+    if (series.length > 1) o.legend = {top: 0, left: 0, itemWidth: 12, itemHeight: 8, textStyle: {color: css("--muted"), fontSize: 11}}; else o.grid.top = 14;
+    o.series = series.map((s, k) => ({name: s.name, type: "bar", barMaxWidth: 26, data: s.data.map(v => ({value: v, itemStyle: {color: s.signed ? (v < 0 ? css("--s3") : css("--s1")) : css(SCOL[k % 4]), borderRadius: v < 0 ? [0, 0, 4, 4] : [4, 4, 0, 0]}})),
+      label: {show: true, position: "top", color: css("--muted"), fontSize: 10, formatter: q => fmt(q.value, opts.dec == null ? 1 : opts.dec) + (opts.pct ? "%" : "")}}));
+    if (opts.ref != null) o.series[0].markLine = {silent: true, symbol: "none", label: {show: false}, lineStyle: {type: "dashed", color: css("--faint")}, data: [{yAxis: opts.ref}]};
+    ch.setOption(o, true);
+  });
+  g.appendChild(catBar("% of stocks positive and median return by horizon", "Below 50% positive = most stocks are falling over that window.", S.horizons.map(x => x.h),
+    [{name: "% stocks positive", data: S.horizons.map(x => x.pos)}, {name: "Median return %", data: S.horizons.map(x => x.median)}], 280, {ref: 50}));
+  ["1D", "1W", "1M", "3M"].forEach(k => g.appendChild(card({t: `${k} return breadth: % of stocks positive`, s: [{d: "pts", pts: S.rolling[k].map(([d, v]) => [new Date(d).getTime(), v]), name: `% positive over ${k}`, unit: "% of stocks", src}], kind: "area", ref: 50, bands: false})));
+  const e = S.hist.edges, cats = ["< " + e[0]].concat(e.slice(1).map((x, i) => `${e[i]} to ${x}`)).concat(["> " + e[e.length - 1]]);
+  g.appendChild(catBar(`1-month return distribution: median ${fmt(S.hist.median, 1)}%, ${fmt(S.hist.pos, 0)}% positive`, "Number of stocks in each 5-point return band.",
+    cats, [{name: "Stocks", data: S.hist.counts}], 280, {rotate: 45, dec: 0}));
+  g.appendChild(card({t: "Stocks within 2% of their 52-week high vs low", s: [{d: "pts", pts: S.near.dates.map((d, i) => [new Date(d).getTime(), S.near.hi[i]]), name: "Near 52W high", src}, {d: "pts", pts: S.near.dates.map((d, i) => [new Date(d).getTime(), S.near.lo[i]]), name: "Near 52W low", src}]}));
+  const nbelow20 = S.dist_hi.filter(x => /50|30 to -20|-30/.test(x.b) && !/20 to -10/.test(x.b)).reduce((a, x) => a + x.n, 0);
+  g.appendChild(catBar(`Distance from 52-week high (${nbelow20} stocks more than 20% below)`, "Number of stocks in each band.", S.dist_hi.map(x => x.b), [{name: "Stocks", data: S.dist_hi.map(x => x.n)}], 280, {dec: 0}));
+  if (S.size.length) g.appendChild(catBar("1-month return by size: the smaller, the harder they fell?", "Ranked by market cap within the Nifty 500.", S.size.map(x => x.bucket),
+    [{name: "Mean", data: S.size.map(x => x.mean)}, {name: "Median", data: S.size.map(x => x.median)}], 260, {pct: true}));
+  if (S.concentration) g.appendChild(catBar("Market concentration: share of total NSE market cap", "Top N stocks by market cap.", S.concentration.map(x => "Top " + x.n),
+    [{name: "% of total market cap", data: S.concentration.map(x => x.share)}], 260, {pct: true}));
+  const tb = (title, rows) => customCard(title, "1-month return, Nifty 500 stocks.", src, 300, ch => {
+    const o = baseOpt(), r = rows.slice().reverse(); o.grid = {left: 8, right: 40, top: 6, bottom: 4, containLabel: true}; o.tooltip.trigger = "item";
+    o.xAxis = {type: "value", axisLabel: {color: css("--muted"), fontSize: 11, formatter: v => v + "%"}, splitLine: {lineStyle: {color: css("--grid")}}};
+    o.yAxis = {type: "category", data: r.map(x => x.s), axisLabel: {color: css("--muted"), fontSize: 11}, axisTick: {show: false}};
+    o.series = [{type: "bar", barMaxWidth: 14, data: r.map(x => ({value: x.r, itemStyle: {color: x.r < 0 ? css("--s3") : css("--s1")}})), label: {show: true, position: x => "right", color: css("--muted"), fontSize: 10, formatter: q => fmt(q.value, 1) + "%"}}];
+    ch.setOption(o, true);
+  });
+  g.appendChild(tb("Top 10 stocks this month", S.top_bottom.top));
+  g.appendChild(tb("Bottom 10 stocks this month", S.top_bottom.bottom));
+  g.appendChild(customCard("Sector risk vs return (3 months)", "Each bubble is an NSE industry: 3-month return (cap-weighted) against annualised volatility; bubble size = market cap. Dashed lines are the medians.", src, 380, ch => {
+    const R = S.risk, mx = Math.max(...R.map(x => x.mcap)), med = a => { const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+    const o = baseOpt(); o.tooltip = {...o.tooltip, trigger: "item", formatter: q => `${q.data[3]}<br>3M return ${fmt(q.data[1], 1)}%<br>Volatility ${fmt(q.data[0], 1)}%<br>${q.data[4]} stocks`};
+    o.xAxis = {type: "value", name: "Volatility (annual %)", nameLocation: "middle", nameGap: 24, nameTextStyle: {color: css("--muted"), fontSize: 11}, scale: true, axisLabel: {color: css("--muted"), fontSize: 11}, splitLine: {lineStyle: {color: css("--grid")}}};
+    o.yAxis = {...o.yAxis, name: "3M return %", nameTextStyle: {color: css("--muted"), fontSize: 11}};
+    o.grid.bottom = 28;
+    o.series = [{type: "scatter", data: R.map(x => [x.vol, x.ret3m, x.mcap, x.sector, x.n]), symbolSize: d => 8 + 34 * Math.sqrt(d[2] / mx),
+      itemStyle: {color: q => q.data[1] < 0 ? css("--s3") : css("--s1"), opacity: .75, borderColor: css("--card"), borderWidth: 2},
+      label: {show: true, formatter: q => q.data[2] > mx * .08 ? q.data[3].split(" ")[0] : "", position: "top", color: css("--muted"), fontSize: 10},
+      markLine: {silent: true, symbol: "none", label: {show: false}, lineStyle: {type: "dashed", color: css("--faint")}, data: [{xAxis: med(R.map(x => x.vol))}, {yAxis: med(R.map(x => x.ret3m))}]}}];
+    ch.setOption(o, true);
+  }, true));
+}
+
+// ---------- FPI by calendar year (added to the flows tab)
+function fpiYearly(p) {
+  const eq = raw("FPI_EQUITY"), dt = raw("FPI_DEBT");
+  if (!eq) return;
+  const sum = pts => { const m = {}; (pts || []).forEach(([t, v]) => { const y = new Date(t).getFullYear(); m[y] = (m[y] || 0) + v; }); return m; };
+  const E = sum(eq), Dt = sum(dt), years = Object.keys(E).map(Number).sort();
+  const g = $("#fg", p);
+  g.insertBefore(customCard("FPI net investment by calendar year (INR cr)", "Equity vs debt. The current year is year to date.", "NSDL", 300, ch => {
+    const o = baseOpt(); o.tooltip.trigger = "axis"; o.tooltip.axisPointer = {type: "shadow"};
+    o.legend = {top: 0, left: 0, itemWidth: 12, itemHeight: 8, textStyle: {color: css("--muted"), fontSize: 11}};
+    o.xAxis = {type: "category", data: years, axisLabel: {color: css("--muted"), fontSize: 11}, axisTick: {show: false}};
+    o.yAxis.scale = false;
+    o.series = [["Equity", E, 0], ["Debt", Dt, 1]].map(([n, m, k]) => ({name: n, type: "bar", barMaxWidth: 12, itemStyle: {color: css(SCOL[k === 0 ? 1 : 2])}, data: years.map(y => m[y] == null ? null : Math.round(m[y]))}));
+    ch.setOption(o, true);
+  }, true), g.children[1] || null);
+}
 function goldPanel(p) {
   const g = D.gold;
   if (!g) { p.innerHTML = `<p class="lede">IMF reserve data was not available in this run.</p>`; return; }
@@ -648,6 +849,7 @@ function build() {
     }
   }
   snapPanel(panels.snap); breadthPanel(panels.breadth); flowsPanel(panels.flows); goldPanel(panels.gold); sectorsPanel(panels.sectors); watchPanel(panels.watch);
+  inflationPanel(panels.inflation); creditPanel(panels.credit); returnsPanel(panels.returns); stockBreadth(panels.breadth); fpiYearly(panels.flows);
   document.querySelectorAll(".ranges button").forEach(b => b.onclick = () => {
     RANGE = +b.dataset.y;
     document.querySelectorAll(".ranges button").forEach(x => x.setAttribute("aria-pressed", +x.dataset.y === RANGE));
