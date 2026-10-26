@@ -100,6 +100,17 @@ td.up{color:var(--up)}td.down{color:var(--down)}
 .ev .d{font-weight:500;color:var(--brand);font-size:13px}
 .ev .w{font-weight:500}.ev .y{grid-column:2;color:var(--muted);font-size:12px}
 .ctl select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--card);color:var(--ink);margin:2px 0 6px}
+.snap-top{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;align-items:start;margin-bottom:16px}.snap-top .insights{margin-bottom:0}
+@media (max-width:900px){.snap-top{grid-template-columns:1fr}}
+.ix-bar{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;display:flex;flex-wrap:wrap;gap:6px}
+.ix-btn{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:3px 12px;font:inherit;font-size:12px;font-weight:500;cursor:pointer}
+.ix-btn:hover{color:var(--ink);border-color:var(--tintline)}
+.ix-btn[aria-expanded="true"]{background:var(--tint);border-color:var(--tintline);color:var(--brand)}
+.ix-body{flex-basis:100%;font-size:13px;line-height:1.55;padding:8px 2px 2px}
+.ix-body ul{margin:0 0 8px;padding-left:18px}.ix-body li{margin-bottom:5px}.ix-body p{margin:0 0 8px}
+.ix-h{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--brand);margin:6px 0 4px}
+.ix-note{color:var(--muted);font-size:12px}.ix-t td,.ix-t th{font-size:12px}
+.chip.ix-pos{background:var(--good-bg);color:var(--good-ink)}.chip.ix-neg{background:var(--bad-bg);color:var(--bad-ink)}
 .foot{color:var(--faint);font-size:12px;margin:24px 0 8px;line-height:1.6}
 @media (max-width:640px){
   .grid{grid-template-columns:1fr}.hero{padding:20px 16px}.hero h1{font-size:23px}
@@ -237,6 +248,7 @@ function card(cfg) {
   const srcs = [...new Set(cfg.s.map(srcOf).filter(Boolean))].join(", ");
   div.innerHTML = `<h3>${cfg.t}</h3>${cfg.why ? `<p class="why">${cfg.why}</p>` : ""}${kv}<div class="chart" style="${cfg.h ? `height:${cfg.h}px` : ""}"></div><div class="src">Source: ${srcs}${cfg.rebase ? " · indexed to 100 at start of range" : ""}${bandsOn(cfg) ? " · shaded band = median ±1σ over the selected range" : ""}</div>`;
   const obj = {el: div.querySelector(".chart"), cfg};
+  if (typeof addToggles === "function") addToggles(div, cfg, cfg.t);
   div._card = obj;
   return div;
 }
@@ -281,7 +293,7 @@ const TABS = [
   ]},
   {id: "value", label: "Valuation and ratios", lede: "Market cap to GDP and relative-value ratios. Each chart shows the median and ±1σ / ±2σ bands over the range you pick, so you can see whether today is stretched against history.", cards: [
     {t: "India market cap to GDP (World Bank, annual)", s: ["IN_MCAP_GDP_WB"], why: "Official annual series. Values far above the median have preceded weak multi-year returns (2007, 2021)."},
-    {t: "India market cap to GDP (recent estimate)", s: ["IN_MCAP_GDP"], bands: false, why: "NSE's total market cap scaled back with the Nifty 500, over trailing four-quarter nominal GDP. Use it for direction, not precision."},
+    {t: "India market cap to GDP (Buffett indicator)", s: ["IN_MCAP_GDP"], why: "Monthly since 2000, same method as GuruFocus: the last official World Bank year-end ratio rolled forward with the Sensex, over trailing 12-month nominal GDP. Bands show where today sits against its own history."},
     {t: "US equity market value to GDP", s: ["US_MCAP_GDP"], why: "The \"Buffett indicator\": US corporate equities (Fed Z.1) over nominal GDP, since 1945."},
     {t: "Nifty 50 / gold", s: ["R:NIFTY_GOLD"], why: "How many 10 g units of gold one Nifty buys. Rising = equities beating gold in rupees."},
     {t: "Sensex / gold (longer history)", s: ["R:SENSEX_GOLD"]},
@@ -347,6 +359,8 @@ const TABS = [
     {t: "JPY/INR", s: ["Y:JPYINR=X"]},
     {t: "USD/BRL", s: ["Y:USDBRL=X"], why: "Latin America: high real rates and resources."},
   ]},
+  {id: "score", label: "Sector scorecard"},
+  {id: "commod", label: "Commodities"},
   {id: "cmdty", label: "Energy and commodities", lede: "Higher oil prices drain liquidity from every other asset class: inflationary in the short term, deflationary in the long term. Shaded bands show where each price sits against its own history; pick 10Y, 20Y or Max to change the benchmark.", cards: [
     {t: "Brent and WTI crude (spot, long history)", s: ["DCOILBRENTEU", "DCOILWTICO"], why: "EIA spot prices since 1986-87, about a week behind futures."},
     {t: "Brent and WTI futures", s: ["Y:BZ=F", "Y:CL=F"]},
@@ -388,7 +402,7 @@ const TABS = [
 function snapPanel(p) {
   const ins = D.insights.map(i => `<div class="ins"><span class="tag">${i.tag}</span><div>${i.text}</div></div>`).join("");
   p.innerHTML = `<div class="bar"><div><h2>This week</h2><p class="lede">What moved and what is stretched. These are observations from the data, not buy or sell calls.</p></div></div>
-  <div class="insights">${ins}</div><h4 class="sec">Macro checklist</h4><div class="checks" id="checks"></div>
+  <div class="snap-top"><div class="insights">${ins}</div><aside class="sc-side card" id="scMini"></aside></div><h4 class="sec">Macro checklist</h4><div class="checks" id="checks"></div>
   <h4 class="sec">Weekly snapshot</h4><div class="tw"><table id="snapT"></table></div>
   <h4 class="sec">Where today sits against history</h4><p class="lede" style="margin:-4px 0 8px">z = distance from the median in standard deviations. Beyond ±1σ is unusual, beyond ±2σ is rare. Percentile = share of past readings below today.</p><div class="tw"><table id="histT"></table></div>`;
   $("#checks", p).innerHTML = checklist().map(c => `<div class="chk"><div class="name">${c.name}</div><div class="state ${c.s}">${c.s === "good" ? "&#9679;" : c.s === "warn" ? "&#9650;" : "&#9632;"} ${c.label}</div><div class="det">${c.det}</div></div>`).join("");
@@ -410,6 +424,8 @@ function snapPanel(p) {
     for (const r of g.rows) hh += `<tr><td>${r.label}</td><td>${smart(r.last)}</td><td>${r.asof}</td><td>${smart(r.med)}</td>${zc(r.z)}<td>${fmt(r.pct, 0)}</td>${zc(r.z10)}<td>${r.pct10 == null ? "n/a" : fmt(r.pct10, 0)}</td><td>${r.since}</td></tr>`;
   }
   $("#histT", p).innerHTML = hh + "</tbody>";
+  const scm = $("#scMini", p);  // compact sector scorecard beside this week's insights (re-filled on theme change too)
+  if (scm) { if (typeof scorecardMini === "function" && D.scorecard) scm.innerHTML = `<h3>Sector scorecard</h3><p class="why">How many macro indicators point for or against each sector. <a href="#score" onclick="show('score');return false">See detail</a></p>` + scorecardMini(); else scm.remove(); }
 }
 function spark(v) {
   v = (v || []).filter(x => x != null); if (v.length < 2) return "";
@@ -525,6 +541,7 @@ function customCard(title, why, src, h, render, wide) {
   div._card = {el: div.querySelector(".chart"), cfg: {}, custom: el => {
     const ch = echarts.getInstanceByDom(el) || echarts.init(el); if (!charts.includes(ch)) charts.push(ch); render(ch, div);
   }};
+  if (typeof addToggles === "function") addToggles(div, {}, title);
   return div;
 }
 function sectorsPanel(p) {
@@ -922,6 +939,8 @@ function build() {
   }
   snapPanel(panels.snap); breadthPanel(panels.breadth); flowsPanel(panels.flows); goldPanel(panels.gold); sectorsPanel(panels.sectors); watchPanel(panels.watch);
   inflationPanel(panels.inflation); creditPanel(panels.credit); returnsPanel(panels.returns); stockBreadth(panels.breadth); fpiYearly(panels.flows);
+  if (typeof scorecardPanel === "function") scorecardPanel(panels.score);
+  if (typeof commodityPanel === "function") commodityPanel(panels.commod);
   auditPanel(panels.audit);
   document.querySelectorAll(".ranges button").forEach(b => b.onclick = () => {
     RANGE = +b.dataset.y;
@@ -950,6 +969,7 @@ $("#themeBtn").onclick = () => {
   snapPanel(panels.snap); redraw();
 };
 try { const t = localStorage.getItem("ml-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+/*__EXTRA_JS__*/
 build();
 </script>
 </body>

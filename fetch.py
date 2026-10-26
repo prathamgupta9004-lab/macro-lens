@@ -712,26 +712,51 @@ def fetch_mcap_gdp(daily):
         j = retry(lambda: requests.get("https://api.worldbank.org/v2/country/IND/indicator/CM.MKT.LCAP.GD.ZS"
                                        "?format=json&per_page=100", timeout=60).json())
         wb = pd.Series({pd.Timestamp(int(z["date"]), 12, 31): z["value"] for z in j[1] if z["value"]}).sort_index()
-        wb = wb[~(wb > wb.shift() * 1.6)]  # drops an obviously broken year (2025 shows 267%)
+        # the World Bank series has broken years (2018 shows 153%, 2025 shows 267%): drop any year that is a spike
+        # against its neighbours (or, for the last year, against the year before)
+        while len(wb) > 3:  # remove the single worst spike, then re-check, so one bad year cannot taint its neighbours
+            nb = pd.concat([wb.shift(), wb.shift(-1)], axis=1).median(axis=1)
+            dev = (np.log(wb / nb)).abs()
+            if dev.max() < np.log(1.45):
+                break
+            wb = wb.drop(dev.idxmax())
         add("IN_MCAP_GDP_WB", wb, "India market cap to GDP (World Bank, annual)", "% of GDP", "World Bank", "valuation",
             "annual", 1)
         s = nse_session()
         mc = s.get("https://www.nseindia.com/api/marketStatus", timeout=30).json()["marketcap"]
         mcap_now = float(mc["marketCapinCRRupees"])
         EXTRA["nse_mcap_cr"] = mcap_now
-        gdp_q = EXTRA.get("in_gdp_q")
-        idx = daily.get("^CRSLDX")
-        if gdp_q is not None and idx is not None:
-            gdp4 = gdp_q.rolling(4).sum().dropna()
-            idx = idx.dropna()
-            est = mcap_now * idx / idx.iloc[-1]
-            est = est[est.index >= est.index[-1] - pd.DateOffset(years=3)]
-            g = gdp4.reindex(est.index, method="ffill")
-            ratio = weekly((est / g * 100).dropna())
-            add("IN_MCAP_GDP", ratio, "India market cap to GDP (estimate)", "% of GDP", "NSE, MOSPI (derived)",
-                "valuation", "weekly", 1,
-                note=f"NSE total market cap (INR {mcap_now/1e5:,.0f} lakh cr on {mc['timeStamp']}) scaled back with the "
-                     "Nifty 500, over trailing four-quarter nominal GDP. Ignores new listings, so earlier points run high.")
+        # Same method as GuruFocus's Buffett indicator: take the last official year-end ratio, roll market cap
+        # forward with the Sensex, and divide by nominal GDP for the latest 12 months.
+        j = retry(lambda: requests.get("https://api.worldbank.org/v2/country/IND/indicator/NY.GDP.MKTP.CN"
+                                       "?format=json&per_page=100", timeout=60).json())
+        gdp_y = pd.Series({int(z["date"]): z["value"] / 1e7 for z in j[1] if z["value"]}).sort_index()  # INR crore
+        sensex = daily.get("^BSESN")
+        if sensex is not None and len(wb):
+            sx = sensex.dropna().resample("ME").last()
+            # denominator: trailing 4-quarter nominal GDP from MOSPI where available, else World Bank annual (interpolated)
+            ann = pd.Series({pd.Timestamp(y, 12, 31): v for y, v in gdp_y.items()})
+            gdp_m = np.exp(np.log(ann).resample("ME").interpolate()).reindex(sx.index).ffill()
+            gdp_q = EXTRA.get("in_gdp_q")
+            if gdp_q is not None:
+                g4 = gdp_q.rolling(4).sum().dropna().resample("ME").last().ffill()
+                gdp_m = g4.reindex(sx.index).ffill().combine_first(gdp_m)
+            gdp_m = gdp_m.ffill()
+            vals = {}
+            for t, level in sx.items():
+                yrs = [y for y in wb.index if y <= t]
+                if not yrs:
+                    continue
+                y = yrs[-1]
+                if y.year not in gdp_y.index or y not in sx.index:
+                    continue
+                mcap = wb[y] / 100 * gdp_y[y.year] * level / sx[y]
+                vals[t] = mcap / gdp_m[t] * 100
+            ratio = pd.Series(vals).dropna()
+            add("IN_MCAP_GDP", ratio, "India market cap to GDP (Buffett indicator)", "% of GDP",
+                "World Bank, BSE Sensex, MOSPI (computed)", "valuation", "monthly", 1,
+                note="Last World Bank year-end ratio rolled forward with the Sensex, over trailing 12-month nominal GDP. "
+                     "Same method as GuruFocus (118% on 26 Oct 2026).")
     except Exception as e:  # noqa: BLE001
         log(f"  ! India mcap/GDP: {e}")
 
@@ -813,6 +838,7 @@ def fetch_sectors():
         lst = lst.dropna(subset=["mcap"])
         lst["group"] = lst["Industry"].map(SECTOR_IN).fillna("Other")
         EXTRA["n500_mcap"] = dict(zip(lst["Symbol"].str.strip() + ".NS", lst["mcap"]))
+        EXTRA["n500_names"] = dict(zip(lst["Symbol"].str.strip() + ".NS", lst["Company Name"].str.strip()))
         ind = lst.groupby("group")["mcap"].sum()
         ind = ind / ind.sum() * 100
         out["india"] = {g: round(float(ind.get(g, 0.0)), 2) for g in SECTOR_US}
@@ -1090,12 +1116,24 @@ def stock_stats(close, hi52, lo52, ind):
         idx = (daily[cols].fillna(0) * w).sum(axis=1)
         risk.append({"sector": sec, "ret3m": round(float(((1 + idx).prod() - 1) * 100), 1),
                      "vol": round(float(idx.std() * np.sqrt(252) * 100), 1), "mcap": round(float(mcap[cols].sum() / 1e12), 2), "n": len(cols)})
-    return {"asof": close.index[-1].strftime("%d %b %Y"), "horizons": horizons, "rolling": roll,
+    names = EXTRA.get("n500_names", {})
+    rets = {s.replace(".NS", ""): [None if pd.isna(ret[k].get(s)) else round(float(ret[k][s]), 1) for k in ("1M", "3M", "1Y")]
+            + [names.get(s, s.replace(".NS", "")), round(float(last[s]), 2) if pd.notna(last[s]) else None] for s in close.columns}
+    return {"asof": close.index[-1].strftime("%d %b %Y"), "horizons": horizons, "rolling": roll, "returns": rets,
             "hist": {"edges": edges, "counts": [int(x) for x in hist_], "median": round(float(r1m.median()), 1),
                      "mean": round(float(r1m.mean()), 1), "pos": round(float((r1m > 0).mean() * 100), 1)},
             "dist_hi": [{"b": nm, "n": int(((dist_hi > a) & (dist_hi <= b)).sum())} for nm, a, b in buckets],
             "near": {"dates": [d.strftime("%Y-%m-%d") for d in near_hi.index], "hi": [int(x) for x in near_hi], "lo": [int(x) for x in near_lo]},
             "size": size, "concentration": conc, "top_bottom": top_bottom, "risk": risk}
+
+
+def fetch_commodities_step():
+    """Optional commodity dashboard data (fetch_commodities.py)."""
+    try:
+        import fetch_commodities
+    except ImportError:
+        return None
+    return fetch_commodities.fetch_commodities()
 
 
 # --------------------------------------------------------------------------- main
@@ -1117,7 +1155,7 @@ def main():
                      ("banking", fetch_banking), ("mcap", lambda: fetch_mcap_gdp(daily)), ("sectors", fetch_sectors),
                      ("repo", fetch_repo), ("breadth", fetch_breadth),
                      ("credit", FI.fetch_rbi_credit), ("cpi", FI.fetch_cpi_detail), ("indices", FI.fetch_nse_tri),
-                     ("bop", FI.fetch_bop)]:
+                     ("bop", FI.fetch_bop), ("commodities", fetch_commodities_step)]:
         try:
             steps[name] = fn()
         except Exception as e:  # noqa: BLE001
@@ -1145,6 +1183,7 @@ def main():
         "credit": steps["credit"],
         "cpi": steps["cpi"],
         "indices": steps["indices"],
+        "commodities": steps["commodities"],
         "log": LOG,
     }
     (DATA / "macro.json").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")

@@ -211,7 +211,7 @@ if g and g.get("table"):
 
 # Where today sits against history: z-score from the median (in standard deviations) and percentile
 HIST = [
-    ("Valuation", [("US equity market value to GDP", "US_MCAP_GDP"), ("India market cap to GDP (World Bank)", "IN_MCAP_GDP_WB")]),
+    ("Valuation", [("US equity market value to GDP", "US_MCAP_GDP"), ("India market cap to GDP (Buffett indicator)", "IN_MCAP_GDP")]),
     ("Ratios", [("Nifty 50 / gold", "R:NIFTY_GOLD"), ("Sensex / gold", "R:SENSEX_GOLD"), ("Nifty 50 / Smallcap 100", "R:NIFTY_SMALL"),
                 ("Nifty 50 / Midcap 100", "R:NIFTY_MID"), ("Gold / silver", ("ratio", "Y:GC=F", "Y:SI=F")),
                 ("Copper / gold", ("ratio", "Y:HG=F", "Y:GC=F"))]),
@@ -263,8 +263,18 @@ D["insights"] = insights
 D.pop("log", None)
 
 html = (ROOT / "template.html").read_text(encoding="utf-8")
+# optional add-ons: chart notes and company maps, sector scorecard, extra page scripts in site/
+notes = ROOT / "data" / "notes.json"
+D["notes"] = json.loads(notes.read_text(encoding="utf-8")) if notes.exists() else {}
+try:
+    import scorecard
+    D["scorecard"] = scorecard.compute_scorecard(D)
+except Exception as e:  # noqa: BLE001
+    print(f"scorecard skipped: {e}")
+    D["scorecard"] = None
+extra_js = "\n".join(p.read_text(encoding="utf-8") for p in sorted((ROOT / "site").glob("*.js")))
 payload = json.dumps(D, separators=(",", ":")).replace("</", "<\\/")
-html = html.replace("/*__DATA__*/null", payload)
+html = html.replace("/*__DATA__*/null", payload).replace("/*__EXTRA_JS__*/", extra_js)
 out = ROOT / "dashboard" / "index.html"
 out.parent.mkdir(exist_ok=True)
 out.write_text(html, encoding="utf-8")

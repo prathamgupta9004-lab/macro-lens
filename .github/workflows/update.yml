@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["fetch.py", "fetch_india.py", "build.py", "template.html", "data/events.json", ".github/workflows/**"]
+    paths: ["fetch.py", "fetch_india.py", "fetch_commodities.py", "scorecard.py", "site/**", "data/notes.json", "build.py", "template.html", "data/events.json", ".github/workflows/**"]
 
 permissions:
   contents: write
