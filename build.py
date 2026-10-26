@@ -215,6 +215,7 @@ html = (ROOT / "template.html").read_text(encoding="utf-8")
 payload = json.dumps(D, separators=(",", ":")).replace("</", "<\\/")
 html = html.replace("/*__DATA__*/null", payload)
 out = ROOT / "dashboard" / "index.html"
+out.parent.mkdir(exist_ok=True)
 out.write_text(html, encoding="utf-8")
 print(f"Wrote {out} ({out.stat().st_size/1e6:.1f} MB), {len(insights)} insights")
 if __name__ == "__main__":
