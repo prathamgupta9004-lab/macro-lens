@@ -57,6 +57,10 @@ SNAP = [
         ("DXY", "Y:DX-Y.NYB", "pct"), ("EUR/USD", "Y:EURUSD=X", "pct"), ("USD/JPY", "Y:USDJPY=X", "pct"),
         ("USD/CNY", "Y:USDCNY=X", "pct"), ("USD/KRW", "Y:USDKRW=X", "pct"), ("USD/BRL", "Y:USDBRL=X", "pct"),
     ]),
+    ("Ratios", [
+        ("Nifty 50 / gold", "R:NIFTY_GOLD", "pct"), ("Nifty 50 / Smallcap 100", "R:NIFTY_SMALL", "pct"),
+        ("Nifty 50 / Midcap 100", "R:NIFTY_MID", "pct"),
+    ]),
     ("Commodities", [
         ("Brent", "Y:BZ=F", "pct"), ("WTI", "Y:CL=F", "pct"), ("Natural gas", "Y:NG=F", "pct"), ("Gold", "Y:GC=F", "pct"),
         ("Silver", "Y:SI=F", "pct"), ("Copper", "Y:HG=F", "pct"), ("Wheat", "Y:ZW=F", "pct"), ("Bitcoin", "Y:BTC-USD", "pct"),
@@ -164,7 +168,7 @@ if hy is not None:
     y1 = hy[hy.index > hy.index[-1] - pd.Timedelta(weeks=52)]
     insights.append({"tag": "Credit", "text": f"US high-yield spread is {hy.iloc[-1]*100:.0f} bp, "
                      f"{(hy.iloc[-1]-y1.min())*100:.0f} bp above its 12-month low of {y1.min()*100:.0f} bp. "
-                     "Ritesh watches credit first: spreads widen before equities react."})
+                     "Credit moves first: spreads widen before equities react."})
 r = derived("ratio", "Y:ACWI", "Y:^GSPC")
 if r is not None and len(r) > 30:
     c26 = (r.iloc[-1] / r.iloc[-27] - 1) * 100
@@ -175,7 +179,7 @@ cw = ser("Y:CRWV")
 if cw is not None:
     hi_ = cw.max()
     insights.append({"tag": "AI health", "text": f"CoreWeave is {(1-cw.iloc[-1]/hi_)*100:.0f}% below its peak of ${hi_:.0f}. "
-                     "Neocloud stocks and their bond yields are his early read on the AI capex cycle."})
+                     "Neocloud stocks and their bond yields are an early read on the AI capex cycle."})
 br = D.get("breadth")
 if br and br.get("above200"):
     a200 = [v for v in br["above200"] if v is not None]
@@ -189,7 +193,7 @@ if cpi is not None and len(cpi) > 1:
 ng = ser("IN_GDP_NOM")
 if ng is not None:
     insights.append({"tag": "India growth", "text": f"India nominal GDP grew {ng.iloc[-1]:.1f}% YoY in the quarter to {ng.index[-1]:%b %Y}. "
-                     "Ritesh's sweet spot for mid and small caps is about 12% nominal (7% real plus 5% inflation)."})
+                     "The sweet spot for mid and small caps is about 12% nominal (7% real plus 5% inflation)."})
 fl = D.get("flows") or []
 if fl:
     df = pd.DataFrame(fl)
@@ -204,6 +208,53 @@ if g and g.get("table"):
     buyers = sorted([x for x in g["table"] if x.get("chg12m")], key=lambda x: -x["chg12m"])[:4]
     insights.append({"tag": "Gold", "text": "Biggest central bank gold buyers over 12 months (IMF data): "
                      + ", ".join(f"{b['country']} {b['chg12m']:+.0f} t" for b in buyers) + "."})
+
+# Where today sits against history: z-score from the median (in standard deviations) and percentile
+HIST = [
+    ("Valuation", [("US equity market value to GDP", "US_MCAP_GDP"), ("India market cap to GDP (World Bank)", "IN_MCAP_GDP_WB")]),
+    ("Ratios", [("Nifty 50 / gold", "R:NIFTY_GOLD"), ("Sensex / gold", "R:SENSEX_GOLD"), ("Nifty 50 / Smallcap 100", "R:NIFTY_SMALL"),
+                ("Nifty 50 / Midcap 100", "R:NIFTY_MID"), ("Gold / silver", ("ratio", "Y:GC=F", "Y:SI=F")),
+                ("Copper / gold", ("ratio", "Y:HG=F", "Y:GC=F"))]),
+    ("Commodities", [("Brent (spot)", "DCOILBRENTEU"), ("WTI (spot)", "DCOILWTICO"), ("Gold", "Y:GC=F"), ("Silver", "Y:SI=F"),
+                     ("Copper", "Y:HG=F"), ("US natural gas", "Y:NG=F"), ("Wheat", "Y:ZW=F"),
+                     ("Brent in INR", ("mult", "DCOILBRENTEU", "DEXINUS"))]),
+    ("Rates and credit", [("US 10Y yield", "DGS10"), ("US 10Y real yield", "DFII10"), ("US 10Y minus 2Y", "T10Y2Y"),
+                          ("Moody's Baa minus 10Y", "BAA10Y"), ("India 10Y yield", "INDIRLTLT01STM"), ("VIX", "Y:^VIX"),
+                          ("India VIX", "Y:^INDIAVIX")]),
+    ("India macro and banking", [("India CPI inflation", "IN_CPI"), ("India real GDP growth", "IN_GDP_REAL"),
+                                 ("Bank credit growth", "IN_CREDIT_YOY"), ("Bank deposit growth", "IN_DEPOSITS_YOY"),
+                                 ("Credit to GDP (BIS)", "IN_CREDIT_GDP"), ("USD/INR", "DEXINUS")]),
+]
+
+
+def zstats(s):
+    s = s.dropna()
+    if len(s) < 24:
+        return None
+    med, sd, last = s.median(), s.std(ddof=0), s.iloc[-1]
+    return {"z": rnd((last - med) / sd if sd else 0, 2), "pct": rnd((s < last).mean() * 100, 0), "med": rnd(med, 4)}
+
+
+history = []
+for group, rows in HIST:
+    out = []
+    for label, spec in rows:
+        s = get(spec)
+        if s is None or len(s) < 24:
+            continue
+        s = s.dropna()
+        full, ten = zstats(s), zstats(s[s.index >= s.index[-1] - pd.DateOffset(years=10)])
+        if not full:
+            continue
+        out.append({"label": label, "last": rnd(s.iloc[-1], 4), "asof": s.index[-1].strftime("%b %Y"), "since": int(s.index[0].year),
+                    "med": full["med"], "z": full["z"], "pct": full["pct"], "z10": ten["z"] if ten else None,
+                    "pct10": ten["pct"] if ten else None})
+    history.append({"group": group, "rows": out})
+stretched = [r for g in history for r in g["rows"] if r["z"] is not None and abs(r["z"]) >= 1.5]
+if stretched:
+    insights.append({"tag": "Vs history", "text": "Furthest from their long-run median: " + ", ".join(
+        f"{r['label']} {r['z']:+.1f}σ" for r in sorted(stretched, key=lambda r: -abs(r["z"]))[:6]) + "."})
+D["history"] = history
 
 ev = ROOT / "data" / "events.json"
 D["events"] = json.loads(ev.read_text(encoding="utf-8")) if ev.exists() else {}

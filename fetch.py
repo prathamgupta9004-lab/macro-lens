@@ -70,6 +70,7 @@ def weekly(s, rule="W-FRI"):
 
 
 SERIES = {}
+EXTRA = {}  # intermediate series shared between fetchers (e.g. India nominal GDP level)
 
 
 def add(sid, s, name, unit, source, group, freq, digits=3, note=""):
@@ -398,7 +399,7 @@ def mospi_pages(sess, path, params, max_pages=40):
     out, page = [], 1
     while page <= max_pages:
         p = dict(params, Format="JSON", limit=100, page=page)
-        j = retry(lambda: sess.get("https://api.mospi.gov.in" + path, params=p, timeout=60).json())
+        j = retry(lambda: sess.get("https://api.mospi.gov.in" + path, params=p, timeout=60).json(), tries=5, wait=8)
         d = j.get("data") or []
         out += d
         meta = j.get("meta_data") or {}
@@ -518,6 +519,9 @@ def fetch_mospi():
         except Exception:  # noqa: BLE001
             oecd = None
         nom, real = splice(g(cur), g(cur0)), splice(g(con), g(con0), oecd)
+        both = cur.index.intersection(cur0.index)
+        scale = (cur[both] / cur0[both]).mean() if len(both) else 1.0
+        EXTRA["in_gdp_q"] = splice(cur, cur0 * scale)  # quarterly nominal GDP, INR crore, old base rescaled
         add("IN_GDP_NOM", nom, "India nominal GDP growth", "% YoY", "MOSPI", "india", "quarterly", 1,
             note="Base 2022-23 from FY24, base 2011-12 before.")
         add("IN_GDP_REAL", real, "India real GDP growth", "% YoY", "MOSPI, OECD via FRED", "india", "quarterly", 1)
@@ -566,6 +570,394 @@ def fetch_flows():
     except Exception as e:  # noqa: BLE001
         log(f"  ! flows: {e}")
     return hist.to_dict("records")
+
+
+# --------------------------------------------------------------------------- NSE index history
+NSE_INDEX_NAMES = {  # current name -> older names used in NSE's archive files
+    "Nifty 50": ["Nifty 50", "CNX Nifty"],
+    "Nifty 500": ["Nifty 500", "CNX 500"],
+    "Nifty Midcap 100": ["NIFTY Midcap 100", "Nifty Midcap 100", "Nifty Free Float Midcap 100", "CNX Midcap"],
+    "Nifty Smallcap 100": ["NIFTY Smallcap 100", "Nifty Smallcap 100", "Nifty Free Float Smallcap 100", "CNX Smallcap"],
+    "Nifty Midcap 150": ["Nifty Midcap 150", "NIFTY Midcap 150"],
+    "Nifty Smallcap 250": ["Nifty Smallcap 250", "NIFTY Smallcap 250"],
+}
+
+
+def fetch_nse_indices():
+    """Month-end closes since 2011 plus every Friday of the last 3 years, from NSE's daily index files.
+    Saved in data/nse_index_closes.csv so each run only downloads new dates."""
+    log("NSE index history")
+    path = DATA / "nse_index_closes.csv"
+    hist = pd.read_csv(path) if path.exists() else pd.DataFrame(columns=["date", "index", "close"])
+    have = set(hist["date"])
+    targets = list(pd.date_range("2011-01-01", TODAY, freq="BME")) + list(pd.date_range(TODAY - pd.DateOffset(years=3), TODAY, freq="W-FRI"))
+    targets = sorted(set(targets + [TODAY]))
+    if have:  # NSE's archive starts in 2013; don't re-request older dates every run
+        targets = [d for d in targets if d >= pd.Timestamp(min(have))]
+    alias = {old.lower(): new for new, olds in NSE_INDEX_NAMES.items() for old in olds}
+    s = requests.Session()
+    s.headers.update({**BROWSER, "Referer": "https://www.nseindia.com/"})
+    rows, tried = [], 0
+    for tgt in targets:
+        # walk back over holidays to the last trading day on or before the target
+        for back in range(5):
+            d = tgt - pd.Timedelta(days=back)
+            key = d.strftime("%Y-%m-%d")
+            if key in have:
+                break
+            if d.dayofweek > 4 or d > TODAY:
+                continue
+            tried += 1
+            try:
+                r = s.get(f"https://nsearchives.nseindia.com/content/indices/ind_close_all_{d:%d%m%Y}.csv", timeout=30)
+            except Exception:  # noqa: BLE001
+                continue
+            if not r.ok:
+                continue
+            x = pd.read_csv(io.StringIO(r.text))
+            for _, row in x.iterrows():
+                nm = alias.get(str(row.iloc[0]).strip().lower())
+                if nm:
+                    try:
+                        rows.append({"date": key, "index": nm, "close": float(row["Closing Index Value"])})
+                    except (ValueError, KeyError):
+                        pass
+            have.add(key)
+            break
+    if rows:
+        hist = pd.concat([hist, pd.DataFrame(rows)]).drop_duplicates(["date", "index"], keep="last").sort_values(["date", "index"])
+        hist.to_csv(path, index=False)
+    piv = hist.pivot_table(index="date", columns="index", values="close")
+    piv.index = pd.to_datetime(piv.index)
+    for nm in NSE_INDEX_NAMES:
+        if nm in piv:
+            add("NSE:" + nm, piv[nm], nm, "index", "NSE", "india_mkt", "periodic", digits=2)
+    log(f"  NSE index closes: {piv.shape[0]} dates, {len(rows)} new rows, {tried} files tried")
+    return piv
+
+
+def fetch_ratios(daily, nse):
+    """Relative-value ratios. Nifty / gold uses gold in rupees; size ratios use NSE's own index history."""
+    log("Ratios")
+    if "^NSEI" in daily and "GC=F" in daily and "USDINR=X" in daily:
+        gold_inr = daily["GC=F"] * daily["USDINR=X"] / 31.1035 * 10  # INR per 10 grams
+        add("R:NIFTY_GOLD", weekly(daily["^NSEI"] / gold_inr), "Nifty 50 / gold (INR per 10 g)", "ratio",
+            "Yahoo Finance (derived)", "ratios", "weekly", digits=4,
+            note="How many 10 g units of gold one Nifty buys. Rising = equities beating gold.")
+    if "^BSESN" in daily and "GC=F" in daily and "USDINR=X" in daily:
+        gold_inr = daily["GC=F"] * daily["USDINR=X"] / 31.1035 * 10
+        add("R:SENSEX_GOLD", weekly(daily["^BSESN"] / gold_inr), "Sensex / gold (INR per 10 g)", "ratio",
+            "Yahoo Finance (derived)", "ratios", "weekly", digits=4)
+    if nse is not None and "Nifty 50" in nse:
+        for nm, sid in [("Nifty Smallcap 100", "R:NIFTY_SMALL"), ("Nifty Midcap 100", "R:NIFTY_MID"),
+                        ("Nifty Smallcap 250", "R:NIFTY_SMALL250"), ("Nifty Midcap 150", "R:NIFTY_MID150")]:
+            if nm in nse:
+                r = (nse["Nifty 50"] / nse[nm]).dropna()
+                add(sid, r, f"Nifty 50 / {nm}", "ratio", "NSE (derived)", "ratios", "periodic", digits=4,
+                    note="Rising = large caps beating the smaller index.")
+
+
+# --------------------------------------------------------------------------- banking and credit
+def fetch_banking():
+    """Bank credit, deposits and broad money as reported by the RBI to the IMF (monetary survey), plus BIS credit/GDP."""
+    log("Banking (RBI via IMF, BIS)")
+    keys = "ODCORP_A_ACO_PS+ODCORP_L_F22_IBM+ODCORP_L_F29_IBM+DCORP_L_BM"
+    url = f"https://api.imf.org/external/sdmx/2.1/data/IMF.STA,MFS_DC/IND.{keys}.XDC.M?startPeriod=2000"
+    try:
+        r = retry(lambda: requests.get(url, timeout=180))
+        ser = {}
+        for m in re.finditer(r"<Series ([^>]+)>(.*?)</Series>", r.text, re.S):
+            a = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+            pts = {pd.Period(p.replace("-M", "-"), "M").to_timestamp(): float(v)
+                   for p, v in re.findall(r'TIME_PERIOD="([^"]+)" OBS_VALUE="([^"]+)"', m.group(2))}
+            ser[a["INDICATOR"]] = pd.Series(pts).sort_index() / 1e12  # INR lakh crore
+        credit = ser["ODCORP_A_ACO_PS"]
+        deposits = (ser["ODCORP_L_F22_IBM"] + ser["ODCORP_L_F29_IBM"]).dropna()
+        m3 = ser["DCORP_L_BM"]
+        src = "RBI data via IMF (monetary survey)"
+        add("IN_CREDIT", credit, "Bank credit to the private sector", "INR lakh cr", src, "banking", "monthly", 1)
+        add("IN_CREDIT_YOY", credit.pct_change(12) * 100, "Bank credit growth", "% YoY", src, "banking", "monthly", 1,
+            note="Jul 2023 includes the HDFC-HDFC Bank merger, which lifts growth for 12 months.")
+        add("IN_DEPOSITS", deposits, "Bank deposits", "INR lakh cr", src, "banking", "monthly", 1)
+        add("IN_DEPOSITS_YOY", deposits.pct_change(12) * 100, "Bank deposit growth", "% YoY", src, "banking", "monthly", 1)
+        add("IN_CD_RATIO", (credit / deposits * 100).dropna(), "Private credit to deposit ratio (monetary survey)", "%", src, "banking", "monthly", 1,
+            note="Bank claims on the private sector over all bank deposits. RBI's headline scheduled-bank C-D ratio uses a narrower base and runs higher.")
+        add("IN_M3_YOY", m3.pct_change(12) * 100, "Broad money (M3) growth", "% YoY", src, "banking", "monthly", 1)
+        gap = (credit.pct_change(12) - deposits.pct_change(12)).dropna() * 100
+        add("IN_CREDIT_DEP_GAP", gap, "Credit growth minus deposit growth", "% pts", src, "banking", "monthly", 1)
+    except Exception as e:  # noqa: BLE001
+        log(f"  ! IMF banking: {e}")
+    for sid, nm, cc in [("QINPAM770A", "India credit to private sector", "IN_CREDIT_GDP"),
+                        ("QUSPAM770A", "US credit to private sector", "US_CREDIT_GDP"),
+                        ("QCNPAM770A", "China credit to private sector", "CN_CREDIT_GDP")]:
+        try:
+            s = fred(sid, "1900")
+            s.index = s.index + pd.offsets.QuarterEnd(0)
+            add(cc, s, f"{nm} (% of GDP)", "% of GDP", "BIS via FRED", "banking", "quarterly", 1)
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! {sid}: {e}")
+
+
+# --------------------------------------------------------------------------- market cap to GDP
+def fetch_mcap_gdp(daily):
+    log("Market cap to GDP")
+    try:  # US: market value of corporate equities (Fed Z.1) / nominal GDP, the usual "Buffett indicator"
+        eq, gdp = fred("NCBEILQ027S", "1900"), fred("GDP", "1900")
+        r = (eq / 1000 / gdp * 100).dropna()
+        add("US_MCAP_GDP", r, "US equity market value to GDP", "% of GDP", "Fed Z.1 and BEA via FRED", "valuation",
+            "quarterly", 1, note="Market value of US non-financial corporate equities over nominal GDP.")
+    except Exception as e:  # noqa: BLE001
+        log(f"  ! US mcap/GDP: {e}")
+    try:  # India: World Bank annual, then a weekly estimate from NSE's total market cap
+        j = retry(lambda: requests.get("https://api.worldbank.org/v2/country/IND/indicator/CM.MKT.LCAP.GD.ZS"
+                                       "?format=json&per_page=100", timeout=60).json())
+        wb = pd.Series({pd.Timestamp(int(z["date"]), 12, 31): z["value"] for z in j[1] if z["value"]}).sort_index()
+        wb = wb[~(wb > wb.shift() * 1.6)]  # drops an obviously broken year (2025 shows 267%)
+        add("IN_MCAP_GDP_WB", wb, "India market cap to GDP (World Bank, annual)", "% of GDP", "World Bank", "valuation",
+            "annual", 1)
+        s = nse_session()
+        mc = s.get("https://www.nseindia.com/api/marketStatus", timeout=30).json()["marketcap"]
+        mcap_now = float(mc["marketCapinCRRupees"])
+        gdp_q = EXTRA.get("in_gdp_q")
+        idx = daily.get("^CRSLDX")
+        if gdp_q is not None and idx is not None:
+            gdp4 = gdp_q.rolling(4).sum().dropna()
+            idx = idx.dropna()
+            est = mcap_now * idx / idx.iloc[-1]
+            est = est[est.index >= est.index[-1] - pd.DateOffset(years=3)]
+            g = gdp4.reindex(est.index, method="ffill")
+            ratio = weekly((est / g * 100).dropna())
+            add("IN_MCAP_GDP", ratio, "India market cap to GDP (estimate)", "% of GDP", "NSE, MOSPI (derived)",
+                "valuation", "weekly", 1,
+                note=f"NSE total market cap (INR {mcap_now/1e5:,.0f} lakh cr on {mc['timeStamp']}) scaled back with the "
+                     "Nifty 500, over trailing four-quarter nominal GDP. Ignores new listings, so earlier points run high.")
+    except Exception as e:  # noqa: BLE001
+        log(f"  ! India mcap/GDP: {e}")
+
+
+# --------------------------------------------------------------------------- sector mix and consumption
+SECTOR_US = {  # Fama-French 49 industries -> common sector groups
+    "Financials": ["Banks", "Insur", "Fin"], "Technology": ["Hardw", "Softw", "Chips", "LabEq", "BusSv"],
+    "Healthcare and pharma": ["Hlth", "MedEq", "Drugs"], "Autos": ["Autos"],
+    "FMCG and staples": ["Agric", "Food", "Soda", "Beer", "Smoke", "Hshld"],
+    "Consumer discretionary": ["Toys", "Fun", "Clths", "Rtail", "Meals", "PerSv", "Txtls"],
+    "Oil, gas and coal": ["Oil", "Coal"], "Metals and mining": ["Steel", "Gold", "Mines"],
+    "Chemicals and materials": ["Chems", "Rubbr", "BldMt", "Paper", "Boxes"],
+    "Capital goods and industrials": ["Mach", "ElcEq", "Aero", "Ships", "Guns", "FabPr"],
+    "Transport and services": ["Trans", "Whlsl"], "Power and utilities": ["Util"],
+    "Telecom and media": ["Telcm", "Books"], "Real estate and construction": ["RlEst", "Cnstr"], "Other": ["Other"],
+}
+SECTOR_IN = {  # NSE industry (Nifty 500 list) -> the same groups
+    "Financial Services": "Financials", "Information Technology": "Technology", "Healthcare": "Healthcare and pharma",
+    "Automobile and Auto Components": "Autos", "Fast Moving Consumer Goods": "FMCG and staples",
+    "Consumer Durables": "Consumer discretionary", "Consumer Services": "Consumer discretionary",
+    "Textiles": "Consumer discretionary", "Oil Gas & Consumable Fuels": "Oil, gas and coal",
+    "Metals & Mining": "Metals and mining", "Chemicals": "Chemicals and materials",
+    "Construction Materials": "Chemicals and materials", "Forest Materials": "Chemicals and materials",
+    "Capital Goods": "Capital goods and industrials", "Services": "Transport and services", "Power": "Power and utilities",
+    "Telecommunication": "Telecom and media", "Media Entertainment & Publication": "Telecom and media",
+    "Realty": "Real estate and construction", "Construction": "Real estate and construction", "Diversified": "Other",
+}
+
+
+def fetch_sectors():
+    log("Sector mix and consumption")
+    out = {"groups": list(SECTOR_US)}
+    # US market-cap mix by industry since 1926: number of firms x average firm size (Fama-French 49 industries)
+    r = retry(lambda: requests.get("https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/49_Industry_Portfolios_CSV.zip",
+                                   headers={"User-Agent": "Mozilla/5.0"}, timeout=120))
+    import zipfile
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    txt = z.read(z.namelist()[0]).decode("latin1").replace("\r", "")
+
+    def block(title):
+        i = txt.index(title)
+        lines = txt[i:].split("\n")[1:]
+        head = [h.strip() for h in lines[0].split(",")]
+        rows = []
+        for ln in lines[1:]:
+            parts = [p.strip() for p in ln.split(",")]
+            if len(parts) < 2 or not re.fullmatch(r"\d{6}", parts[0]):
+                break
+            rows.append(parts)
+        df = pd.DataFrame([p[1:] for p in rows], index=[p[0] for p in rows], columns=head[1:]).astype(float)
+        df.index = pd.to_datetime(df.index, format="%Y%m")
+        return df.where(df > -99)
+
+    n, size = block("Number of Firms in Portfolios"), block("Average Firm Size")
+    mcap = (n * size).fillna(0)
+    grp = pd.DataFrame({g: mcap[[c for c in cols if c in mcap]].sum(axis=1) for g, cols in SECTOR_US.items()})
+    share = grp.div(grp.sum(axis=1), axis=0) * 100
+    yearly = share[share.index.month == 12]
+    latest = share.iloc[[-1]]
+    us = pd.concat([yearly, latest]) if latest.index[0] not in yearly.index else yearly
+    out["us"] = {"dates": [d.strftime("%Y-%m") for d in us.index],
+                 **{g: [round(float(v), 2) for v in us[g]] for g in us.columns}}
+    out["us_latest"] = latest.index[0].strftime("%b %Y")
+    log(f"  US industries: {us.index[0]:%Y} to {us.index[-1]:%b %Y}")
+
+    # India today: Nifty 500 market caps grouped the same way
+    try:
+        lst = pd.read_csv(io.StringIO(retry(lambda: requests.get(
+            "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv", headers=BROWSER, timeout=60)).text))
+        from concurrent.futures import ThreadPoolExecutor
+
+        def cap(sym):
+            try:
+                return yf.Ticker(sym + ".NS").fast_info["marketCap"]
+            except Exception:  # noqa: BLE001
+                return None
+        with ThreadPoolExecutor(16) as ex:
+            lst["mcap"] = list(ex.map(cap, lst["Symbol"].str.strip()))
+        lst = lst.dropna(subset=["mcap"])
+        lst["group"] = lst["Industry"].map(SECTOR_IN).fillna("Other")
+        ind = lst.groupby("group")["mcap"].sum()
+        ind = ind / ind.sum() * 100
+        out["india"] = {g: round(float(ind.get(g, 0.0)), 2) for g in SECTOR_US}
+        out["india_n"] = int(len(lst))
+        out["india_mcap_cr"] = round(float(lst["mcap"].sum()) / 1e7)
+        log(f"  India sector mix: {len(lst)} stocks priced")
+    except Exception as e:  # noqa: BLE001
+        log(f"  ! India sector mix: {e}")
+
+    # real household consumption per head (constant 2015 USD), World Bank; US extended back with BEA real PCE per head
+    try:
+        j = retry(lambda: requests.get("https://api.worldbank.org/v2/country/IND;USA;CHN;KOR;JPN;BRA/indicator/"
+                                       "NE.CON.PRVT.PC.KD?format=json&per_page=1000&date=1960:2030", timeout=60).json())
+        wb = pd.DataFrame([(z["country"]["id"], int(z["date"]), z["value"]) for z in j[1] if z["value"]],
+                          columns=["c", "y", "v"]).pivot(index="y", columns="c", values="v").sort_index()
+        # chain older BEA series onto the World Bank one, each rescaled where they overlap:
+        # quarterly real PCE per head (from 1947), then annual real PCE / population (from 1929)
+        q = fred("A794RX0Q048SBEA", "1900")
+        q = q.groupby(q.index.year).mean()
+        a = fred("PCECCA", "1900") / fred("B230RC0A052NBEA", "1900")
+        a = a.groupby(a.index.year).mean()
+        us = wb["US"].dropna().copy()
+        for older in (q, a):
+            first = us.index[0]
+            us = us.combine_first(older[older.index < first] * (us[first] / older[first]))
+        wb = wb.reindex(sorted(set(wb.index) | set(us.index)))
+        wb["US"] = us
+        wb = wb.sort_index()
+        out["consumption"] = {"years": [int(y) for y in wb.index],
+                              **{c: [None if pd.isna(v) else round(float(v)) for v in wb[c]] for c in wb.columns}}
+        india_now_year = int(wb["IN"].last_valid_index())
+        india_now = float(wb["IN"][india_now_year])
+        scen = []
+        for gr in (4, 5, 6):
+            for yrs in (10, 25, 50):
+                val = india_now * (1 + gr / 100) ** yrs
+                hit = us[us >= val]
+                us_year = int(hit.index[0]) if len(hit) else None
+                scen.append({"growth": gr, "year": india_now_year + yrs, "value": round(val), "multiple": round(val / india_now, 1),
+                             "us_year": us_year, "us_before": us_year == int(us.index[0])})
+        out["scenarios"] = scen
+        out["india_now"] = {"year": india_now_year, "value": round(india_now)}
+        log(f"  consumption: India {india_now:,.0f} in {india_now_year}; US from {int(us.index[0])}")
+    except Exception as e:  # noqa: BLE001
+        log(f"  ! consumption: {e}")
+    return out
+
+
+NSE_CAT = {  # NSE category-wise turnover labels -> one name per category
+    "fpi": "FPI", "mutual funds": "Mutual funds", "insurance companies": "Insurance", "bank": "Banks",
+    "aif": "AIFs", "aifs": "AIFs", "pms": "PMS", "retail": "Retail", "others": "Others",
+}
+
+
+def fetch_nse_category():
+    """NSE's daily category-wise cash turnover (FPI, MFs, insurers, banks, AIFs, PMS, retail).
+    The detailed split exists from 2023; days already saved in data/nse_category_daily.csv are skipped."""
+    log("NSE category turnover")
+    path = DATA / "nse_category_daily.csv"
+    hist = pd.read_csv(path) if path.exists() else pd.DataFrame(columns=["date", "category", "buy", "sell"])
+    have = set(hist["date"])
+    start = pd.Timestamp("2023-01-01") if hist.empty else pd.Timestamp(max(have)) - pd.Timedelta(days=10)
+    days = [d for d in pd.bdate_range(start, TODAY) if d.strftime("%Y-%m-%d") not in have]
+    s = requests.Session()
+    s.headers.update({**BROWSER, "Referer": "https://www.nseindia.com/"})
+    rows = []
+    for d in days:
+        url = f"https://nsearchives.nseindia.com/archives/equities/cat/cat_turnover_{d:%d%m%y}.xls"
+        try:
+            r = s.get(url, timeout=30)
+            if not r.ok:
+                continue  # holiday or not yet published
+            x = pd.read_excel(io.BytesIO(r.content), header=None)
+        except Exception:  # noqa: BLE001
+            continue
+        for _, row in x.iterrows():
+            cat = NSE_CAT.get(str(row[1]).strip().lower())
+            if cat and pd.notna(row[2]) and pd.notna(row[3]):
+                try:
+                    rows.append({"date": d.strftime("%Y-%m-%d"), "category": cat, "buy": float(row[2]), "sell": float(row[3])})
+                except ValueError:
+                    pass
+    if rows:
+        hist = pd.concat([hist, pd.DataFrame(rows)]).drop_duplicates(["date", "category"], keep="last").sort_values(["date", "category"])
+        hist.to_csv(path, index=False)
+    hist = hist[hist["category"] != "Others"]
+    log(f"  category history: {hist['date'].nunique()} days ({len(rows)} new rows)")
+    hist["net"] = hist["buy"] - hist["sell"]
+    hist["month"] = pd.to_datetime(hist["date"]).dt.to_period("M").dt.to_timestamp()
+    monthly = hist.pivot_table(index="month", columns="category", values="net", aggfunc="sum").round(0)
+    daily = hist[pd.to_datetime(hist["date"]) >= TODAY - pd.Timedelta(days=120)].pivot_table(
+        index="date", columns="category", values="net", aggfunc="sum").round(1)
+    return {"monthly": {"dates": [d.strftime("%Y-%m-%d") for d in monthly.index],
+                        **{c: [None if pd.isna(v) else float(v) for v in monthly[c]] for c in monthly.columns}},
+            "daily": {"dates": list(daily.index), **{c: [None if pd.isna(v) else float(v) for v in daily[c]] for c in daily.columns}},
+            "first": hist["date"].min()}
+
+
+def fetch_nsdl_fpi():
+    """Monthly FPI net investment (equity, debt, total) from NSDL, the depository's official record, 2002 onwards."""
+    log("NSDL FPI monthly")
+    url = "https://www.fpi.nsdl.co.in/web/Reports/Yearwise.aspx?RptType=6"
+    s = requests.Session()
+    s.headers.update(BROWSER)
+    r = retry(lambda: s.get(url, timeout=60))
+    months = {m: i for i, m in enumerate(["January", "February", "March", "April", "May", "June", "July", "August",
+                                          "September", "October", "November", "December"], 1)}
+
+    def parse(html, year):
+        # rows are not closed with </tr>, and since 2019 debt is split into General / VRR / FAR columns
+        out, debt_cols = [], [1]
+        for tr in re.split(r"<tr[^>]*>", html, flags=re.I)[1:]:
+            cells = [re.sub(r"<[^>]+>|&nbsp;|\*", " ", c).strip() for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S | re.I)]
+            if cells and cells[0] == "Equity":  # second header row: first block is FPI, later blocks are MF/AIF
+                block = cells[:cells.index("Hybrid")] if "Hybrid" in cells else cells[:2]
+                debt_cols = [i for i, c in enumerate(block) if c.startswith("Debt")] or [1]
+            if cells and cells[0].split(" ")[0] in months:
+                nums = [float(c.replace(",", "")) for c in cells[1:] if re.fullmatch(r"-?[\d,]+(\.\d+)?", c.replace(" ", ""))]
+                if len(nums) >= 3:
+                    out.append({"month": pd.Timestamp(year, months[cells[0].split(" ")[0]], 1),
+                                "equity": nums[0], "debt": sum(nums[i] for i in debt_cols if i < len(nums)), "total": nums[-1]})
+        return out
+
+    rows = parse(r.text, TODAY.year)
+    form = dict(re.findall(r'<input[^>]+name="(__[A-Z]+)"[^>]+value="([^"]*)"', r.text))
+    sel = re.search(r'<select[^>]+name="([^"]+)"[^>]*>(.*?)</select>', r.text, re.S)
+    if sel:
+        for y in [int(v) for v in re.findall(r'value="(\d{4})"', sel.group(2)) if int(v) < TODAY.year]:
+            got = []
+            for attempt in range(4):  # the year postback sometimes comes back empty
+                try:
+                    rr = s.post(url, data={**form, sel.group(1): str(y), "__EVENTTARGET": sel.group(1)}, timeout=60)
+                    got = parse(rr.text, y)
+                except Exception as e:  # noqa: BLE001
+                    log(f"  ! NSDL {y}: {e}")
+                if len(got) >= 12:
+                    break
+                time.sleep(2 * (attempt + 1))
+            rows += got
+    if not rows:
+        log("  ! NSDL: nothing parsed")
+        return None
+    df = pd.DataFrame(rows).drop_duplicates("month").set_index("month").sort_index()
+    for c, nm in [("equity", "FPI net investment: equity"), ("debt", "FPI net investment: debt"), ("total", "FPI net investment: total")]:
+        add("FPI_" + c.upper(), df[c], nm, "INR cr", "NSDL", "flows", "monthly", digits=0)
+    log(f"  NSDL months: {len(df)} ({df.index.min():%b %Y} to {df.index.max():%b %Y})")
+    return True
 
 
 def fetch_repo():
@@ -657,13 +1049,30 @@ def main():
     fetch_eia()
     daily = fetch_yahoo()
     gold_px = float(daily["GC=F"].dropna().iloc[-1]) if "GC=F" in daily else None
+    nse = None
+    try:
+        nse = fetch_nse_indices()
+    except Exception as e:  # noqa: BLE001
+        log(f"  ! NSE indices failed: {e}")
     for name, fn in [("gold", lambda: fetch_imf(gold_px)), ("mospi", fetch_mospi), ("flows", fetch_flows),
+                     ("category", fetch_nse_category), ("fpi", fetch_nsdl_fpi), ("ratios", lambda: fetch_ratios(daily, nse)),
+                     ("banking", fetch_banking), ("mcap", lambda: fetch_mcap_gdp(daily)), ("sectors", fetch_sectors),
                      ("repo", fetch_repo), ("breadth", fetch_breadth)]:
         try:
             steps[name] = fn()
         except Exception as e:  # noqa: BLE001
             log(f"  ! {name} failed: {e}")
             steps[name] = None
+    # a source that is down today should not blank the page: reuse yesterday's copy of slow-moving series
+    cache_path = DATA / "series_cache.json"
+    cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+    for sid, s in cache.items():
+        if sid not in SERIES:
+            SERIES[sid] = {**s, "note": (s.get("note") or "") + " (from the previous run; source unavailable today)"}
+            log(f"  ! {sid}: source failed, reused cached copy")
+    slow = {sid: s for sid, s in SERIES.items() if s["freq"] in ("monthly", "quarterly", "annual", "periodic")
+            and not s.get("note", "").endswith("source unavailable today)")}
+    cache_path.write_text(json.dumps({**cache, **slow}, separators=(",", ":")), encoding="utf-8")
     out = {
         "generated": (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M IST"),
         "series": SERIES,
@@ -671,6 +1080,8 @@ def main():
         "flows": steps["flows"],
         "repo": steps["repo"],
         "breadth": steps["breadth"],
+        "category": steps["category"],
+        "sectors": steps["sectors"],
         "log": LOG,
     }
     (DATA / "macro.json").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")

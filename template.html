@@ -71,6 +71,7 @@ main{max-width:1440px;margin:0 auto;padding:16px}
 .kv .u{font-size:12px;color:var(--faint)}
 .chip{font-size:12px;font-weight:500;border-radius:999px;padding:1px 8px;font-variant-numeric:tabular-nums;background:var(--bg);color:var(--muted)}
 .chip.up{color:var(--up)} .chip.down{color:var(--down)}
+.chip.warm{background:var(--warn-bg);color:var(--warn-ink)} .chip.hot{background:var(--bad-bg);color:var(--bad-ink)}
 .chart{height:240px;width:100%}
 .src{font-size:11px;color:var(--faint);margin-top:2px}
 .panel{display:none}.panel.on{display:block}
@@ -98,6 +99,7 @@ td.up{color:var(--up)}td.down{color:var(--down)}
 .ev{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:grid;grid-template-columns:110px 1fr;gap:4px 14px}
 .ev .d{font-weight:500;color:var(--brand);font-size:13px}
 .ev .w{font-weight:500}.ev .y{grid-column:2;color:var(--muted);font-size:12px}
+.ctl select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--card);color:var(--ink);margin:2px 0 6px}
 .foot{color:var(--faint);font-size:12px;margin:24px 0 8px;line-height:1.6}
 @media (max-width:640px){
   .grid{grid-template-columns:1fr}.hero{padding:20px 16px}.hero h1{font-size:23px}
@@ -108,7 +110,7 @@ td.up{color:var(--up)}td.down{color:var(--down)}
 </head>
 <body>
 <header class="hero"><div class="hero-in">
-  <div><h1>Macro Lens</h1><p>India and global macro in one place, refreshed every weekday evening. Built on Ritesh Jain's framework: nominal growth, bonds first, follow the government.</p></div>
+  <div><h1>Macro Lens</h1><p>India and global macro in one place, refreshed every weekday evening. Framework: track nominal growth, read the bond market first, follow government incentives.</p></div>
   <div class="stamp">Data as of <b id="gen"></b><br><button class="theme-btn" id="themeBtn" type="button">Toggle theme</button></div>
 </div></header>
 <nav><div class="nav-in" id="tabs" role="tablist"></div></nav>
@@ -145,6 +147,17 @@ let RANGE = 10;
 const RANGES = [["1Y", 1], ["3Y", 3], ["5Y", 5], ["10Y", 10], ["20Y", 20], ["Max", 99]];
 function clip(pts, yrs) { if (!pts) return pts; const cut = Date.now() - yrs * 365.25 * 864e5; return pts.filter(p => p[0] >= cut); }
 function rangeBar() { return `<div class="ranges" role="group" aria-label="Time range">${RANGES.map(([l, y]) => `<button type="button" data-y="${y}" aria-pressed="${y === RANGE}">${l}</button>`).join("")}</div>`; }
+// median and standard deviation of a series over the visible window: how far today sits from "normal"
+function stats(pts) {
+  const v = (pts || []).map(p => p[1]).filter(x => x != null && isFinite(x));
+  if (v.length < 24) return null;
+  const s = [...v].sort((a, b) => a - b), n = s.length, med = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+  const mean = v.reduce((a, b) => a + b, 0) / n, sd = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / n);
+  const last = v[v.length - 1], below = s.filter(x => x < last).length;
+  return {med, sd, last, z: sd ? (last - med) / sd : 0, pct: below / n * 100, from: new Date(pts[0][0]).getFullYear()};
+}
+const bandsOn = c => c.bands !== false && c.s.length === 1 && !c.rebase && (c.kind || "line") !== "bar";
+function zText(st) { return `${st.z > 0 ? "+" : ""}${fmt(st.z, 1)}σ vs median · ${fmt(st.pct, 0)}th percentile since ${st.from}`; }
 function rebase(pts) { if (!pts || !pts.length) return pts; const b = pts[0][1]; return pts.map(([t, v]) => [t, v / b * 100]); }
 
 // ---------- chart rendering
@@ -183,6 +196,20 @@ function draw(card) {
   const ref = c.ref != null ? c.ref : (c.rebase ? 100 : null);
   if (ref != null && series[0]) series[0].markLine = {silent: true, symbol: "none", label: {show: false}, lineStyle: {color: css("--faint"), type: "dashed", width: 1}, data: [{yAxis: ref}]};
   if (c.kind === "bar" || c.kind === "area") opt.yAxis.scale = false; // bars and areas are read from zero
+  const st = bandsOn(c) && series[0] ? stats(series[0].data) : null;
+  if (st) {
+    const lv = [[st.med, "Median", "solid"], [st.med + st.sd, "+1σ", "dashed"], [st.med - st.sd, "-1σ", "dashed"], [st.med + 2 * st.sd, "+2σ", "dotted"], [st.med - 2 * st.sd, "-2σ", "dotted"]];
+    if (ref != null) lv.push([ref, c.refLabel || "Reference", "dashed"]);
+    series[0].markLine = {silent: true, symbol: "none", lineStyle: {color: css("--faint"), width: 1},
+      label: {show: true, position: "insideEndTop", color: css("--faint"), fontSize: 10, formatter: q => q.name},
+      data: lv.map(([y, name, type]) => ({yAxis: y, name, lineStyle: {type, color: css("--faint")}}))};
+    series[0].markArea = {silent: true, itemStyle: {color: css("--tint"), opacity: .55}, data: [[{yAxis: st.med - st.sd}, {yAxis: st.med + st.sd}]]};
+    const vals = series[0].data.map(p => p[1]);
+    opt.yAxis.min = Math.min(...vals, st.med - 2 * st.sd); opt.yAxis.max = Math.max(...vals, st.med + 2 * st.sd);
+    opt.yAxis.min = +opt.yAxis.min.toPrecision(3); opt.yAxis.max = +opt.yAxis.max.toPrecision(3);
+    const z = card.el.parentElement.querySelector(".zchip");
+    if (z) { z.textContent = zText(st); z.className = "chip zchip " + (Math.abs(st.z) >= 2 ? "hot" : Math.abs(st.z) >= 1 ? "warm" : ""); }
+  }
   if (c.kind === "bar" && c.s.length === 1) {
     series[0].itemStyle.color = p => p.value[1] < 0 ? css("--s3") : css("--s1");
   }
@@ -205,10 +232,10 @@ function card(cfg) {
       const ch = isRate ? last[1] - yago[1] : (last[1] / yago[1] - 1) * 100;
       chip = `<span class="chip ${ch > 0 ? "up" : ch < 0 ? "down" : ""}">${ch > 0 ? "+" : ""}${fmt(ch, isRate ? 2 : 1)}${isRate ? " pts" : "%"} vs 1Y ago</span>`;
     }
-    kv = `<div class="kv"><span class="v">${smart(last[1])}</span><span class="u">${unit} · ${new Date(last[0]).toLocaleDateString("en-GB", {day: "2-digit", month: "short", year: "numeric"})}</span>${chip}</div>`;
+    kv = `<div class="kv"><span class="v">${smart(last[1])}</span><span class="u">${unit} · ${new Date(last[0]).toLocaleDateString("en-GB", {day: "2-digit", month: "short", year: "numeric"})}</span>${chip}</div>${bandsOn(cfg) ? `<div class="kv"><span class="chip zchip"></span></div>` : ""}`;
   }
   const srcs = [...new Set(cfg.s.map(srcOf).filter(Boolean))].join(", ");
-  div.innerHTML = `<h3>${cfg.t}</h3>${cfg.why ? `<p class="why">${cfg.why}</p>` : ""}${kv}<div class="chart" style="${cfg.h ? `height:${cfg.h}px` : ""}"></div><div class="src">Source: ${srcs}${cfg.rebase ? " · indexed to 100 at start of range" : ""}</div>`;
+  div.innerHTML = `<h3>${cfg.t}</h3>${cfg.why ? `<p class="why">${cfg.why}</p>` : ""}${kv}<div class="chart" style="${cfg.h ? `height:${cfg.h}px` : ""}"></div><div class="src">Source: ${srcs}${cfg.rebase ? " · indexed to 100 at start of range" : ""}${bandsOn(cfg) ? " · shaded band = median ±1σ over the selected range" : ""}</div>`;
   const obj = {el: div.querySelector(".chart"), cfg};
   div._card = obj;
   return div;
@@ -218,7 +245,7 @@ function card(cfg) {
 const R = (a, b, name, src = "Yahoo Finance (derived)") => ({d: "ratio", a, b, name, src});
 const TABS = [
   {id: "snap", label: "Weekly snapshot"},
-  {id: "india", label: "India macro", lede: "Ritesh's anchor is nominal GDP: about 12% (7% real plus 5% inflation) is the best case for mid and small caps. Oil, the rupee and RBI rates are what can break it.", cards: [
+  {id: "india", label: "India macro", lede: "The anchor is nominal GDP: about 12% (7% real plus 5% inflation) is the best case for mid and small caps. Oil, the rupee and RBI rates are what can break it.", cards: [
     {t: "India nominal vs real GDP growth", s: ["IN_GDP_NOM", "IN_GDP_REAL"], kind: "bar", why: "Nominal growth drives corporate revenue. Watch the gap to the 12% sweet spot.", ref: 12},
     {t: "India CPI inflation", s: ["IN_CPI"], ref: 4, why: "RBI targets 4% (dashed). Above about 5% squeezes real growth and pushes the RBI to hike. Joined series: base 2024 from 2026, base 2012 from 2014, OECD index before."},
     {t: "India CPI: food and beverages", s: ["IN_CPI_FOOD"], kind: "bar", why: "Food is the swing factor in Indian inflation. New 2024 base, so history starts in 2026."},
@@ -232,28 +259,53 @@ const TABS = [
     {t: "USD/INR", s: ["Y:USDINR=X"], why: "If oil stays high and fuel prices are not raised, the rupee takes the hit."},
     {t: "INR vs Chinese yuan (CNY/INR)", s: ["Y:CNYINR=X"], why: "Rising line = rupee weaker vs yuan, which makes Indian exports more competitive against China."},
     {t: "Brent crude in rupees", s: [{d: "mult", a: "DCOILBRENTEU", b: "DEXINUS", name: "Brent (INR per barrel)", src: "FRED (derived)"}], why: "What India actually pays. Higher oil sucks liquidity from every other asset."},
-    {t: "India total reserves", s: ["IND_RES"], why: "Buffer against oil and capital-flow shocks."},
+    {t: "India total reserves", s: ["IND_RES"], bands: false, why: "Buffer against oil and capital-flow shocks."},
     {t: "Nifty in US dollars", s: [R("Y:^NSEI", "Y:USDINR=X", "Nifty 50 in USD")], why: "How a foreign investor sees Indian equity returns."},
   ]},
   {id: "breadth", label: "India breadth", lede: "Nifty 500 participation, computed each week from daily prices. India is a bottom-up market, so breadth tells you more than the index."},
   {id: "flows", label: "FII / DII flows"},
+  {id: "value", label: "Valuation and ratios", lede: "Market cap to GDP and relative-value ratios. Each chart shows the median and ±1σ / ±2σ bands over the range you pick, so you can see whether today is stretched against history.", cards: [
+    {t: "India market cap to GDP (World Bank, annual)", s: ["IN_MCAP_GDP_WB"], why: "Official annual series. Values far above the median have preceded weak multi-year returns (2007, 2021)."},
+    {t: "India market cap to GDP (recent estimate)", s: ["IN_MCAP_GDP"], bands: false, why: "NSE's total market cap scaled back with the Nifty 500, over trailing four-quarter nominal GDP. Use it for direction, not precision."},
+    {t: "US equity market value to GDP", s: ["US_MCAP_GDP"], why: "The \"Buffett indicator\": US corporate equities (Fed Z.1) over nominal GDP, since 1945."},
+    {t: "Nifty 50 / gold", s: ["R:NIFTY_GOLD"], why: "How many 10 g units of gold one Nifty buys. Rising = equities beating gold in rupees."},
+    {t: "Sensex / gold (longer history)", s: ["R:SENSEX_GOLD"]},
+    {t: "Nifty 50 / Nifty Smallcap 100", s: ["R:NIFTY_SMALL"], why: "Rising = large caps outperforming small caps. Peaks mark small-cap washouts; troughs mark small-cap euphoria."},
+    {t: "Nifty 50 / Nifty Midcap 100", s: ["R:NIFTY_MID"], why: "Rising = large caps outperforming mid caps."},
+    {t: "Nifty 50 / Nifty Smallcap 250", s: ["R:NIFTY_SMALL250"]},
+    {t: "Nifty 50 / Nifty Midcap 150", s: ["R:NIFTY_MID150"]},
+    {t: "Gold / silver ratio", s: [R("Y:GC=F", "Y:SI=F", "Gold / silver")]},
+    {t: "Copper / gold ratio", s: [R("Y:HG=F", "Y:GC=F", "Copper / gold")], why: "Growth optimism vs fear."},
+    {t: "MSCI ACWI vs S&P 500", s: [R("Y:ACWI", "Y:^GSPC", "ACWI / S&P 500")]},
+  ]},
+  {id: "bank", label: "Banking and credit", lede: "RBI data on bank credit, deposits and money supply (as reported to the IMF monetary survey, monthly), plus BIS credit to GDP since 1951. Credit growing faster than deposits for long squeezes bank liquidity and pushes deposit rates up.", cards: [
+    {t: "Bank credit vs deposit growth", s: ["IN_CREDIT_YOY", "IN_DEPOSITS_YOY"], why: "July 2023 to June 2024 is lifted by the HDFC merger."},
+    {t: "Credit growth minus deposit growth", s: ["IN_CREDIT_DEP_GAP"], kind: "bar", ref: 0},
+    {t: "Credit to deposit ratio", s: ["IN_CD_RATIO"], why: "Credit to the private sector over bank deposits. A rising ratio means banks are lending out more of each rupee deposited."},
+    {t: "Broad money (M3) growth", s: ["IN_M3_YOY"]},
+    {t: "Bank credit to the private sector", s: ["IN_CREDIT"], kind: "area", bands: false},
+    {t: "Bank deposits", s: ["IN_DEPOSITS"], kind: "area", bands: false},
+    {t: "India credit to private sector (% of GDP)", s: ["IN_CREDIT_GDP"], why: "BIS series since 1951. India is still far below China and the US, which is the long-run room for credit growth."},
+    {t: "Credit to GDP: India, China, US", s: ["IN_CREDIT_GDP", "CN_CREDIT_GDP", "US_CREDIT_GDP"]},
+    {t: "India 10Y government bond yield", s: ["INDIRLTLT01STM"]},
+  ]},
   {id: "us", label: "US and liquidity", lede: "US nominal growth is about 7%, but outside AI the economy is hurting. Watch housing, delinquencies, debt and the liquidity the Fed and Treasury provide.", cards: [
     {t: "US nominal vs real GDP growth", s: ["GDP", "GDPC1"], why: "Nominal growth matters for profits; real growth is the headline."},
     {t: "US CPI and core PCE inflation", s: ["CPIAUCSL", "PCEPILFE"], ref: 2, why: "The Fed's 2% target is the dashed line."},
     {t: "US unemployment rate", s: ["UNRATE"]},
     {t: "US initial jobless claims", s: ["ICSA"], kind: "area", why: "Weekly, the fastest read on layoffs."},
     {t: "US non-farm payrolls, monthly change", s: ["PAYEMS"], kind: "bar"},
-    {t: "US housing starts", s: ["HOUST"], why: "Ritesh flagged weak housing starts as a sign the non-AI economy is hurting."},
+    {t: "US housing starts", s: ["HOUST"], why: "Weak housing starts signal that the economy outside AI is hurting."},
     {t: "US consumer loan and credit card delinquency", s: ["DRCLACBS", "DRCCLACBS"], why: "Rising delinquencies (cars, cards) point to stress on the consumer."},
     {t: "US federal debt to GDP", s: ["GFDEGDQ188S"], why: "About 125%. The way out is growth (productivity) or inflation."},
     {t: "US federal deficit", s: ["FYFSGDA188S"], kind: "bar", why: "Negative = deficit. Bigger deficits mean more Treasury supply."},
     {t: "US manufacturing share of GDP", s: ["VAPGDPMA"], why: "Under 10%. Reshoring aims to lift this, which needs grid and power."},
-    {t: "US net liquidity", s: ["NETLIQ"], kind: "area", why: "Fed balance sheet minus Treasury cash minus reverse repo. Markets tend to follow it."},
-    {t: "Fed balance sheet", s: ["WALCL"], kind: "area"},
+    {t: "US net liquidity", s: ["NETLIQ"], kind: "area", bands: false, why: "Fed balance sheet minus Treasury cash minus reverse repo. Markets tend to follow it."},
+    {t: "Fed balance sheet", s: ["WALCL"], kind: "area", bands: false},
     {t: "US M2 money supply growth", s: ["M2SL"], ref: 0},
     {t: "US industrial production growth", s: ["INDPRO"], ref: 0},
   ]},
-  {id: "rates", label: "Rates and credit", lede: "\"I always look at fixed income spreads to tell me whether the macros are changing.\" Bond investors move first; equities react with a lag.", cards: [
+  {id: "rates", label: "Rates and credit", lede: "Fixed income spreads are the first place a change in the macro shows up. Bond investors move first; equities react with a lag.", cards: [
     {t: "US high-yield credit spread", s: ["BAMLH0A0HYM2"], kind: "area", why: "The main stress gauge. Sharp widening = trouble in the wonderland. FRED now only publishes 3 years of the ICE BofA spreads; the Moody's chart below has the long history."},
     {t: "Corporate spreads, long history: Moody's Baa and Aaa minus 10Y", s: ["BAA10Y", "AAA10Y"], why: "Daily since 1986. Spikes mark every credit event: 1998, 2001, 2008, 2020."},
     {t: "US CCC-and-below spread", s: ["BAMLH0A3HYC"], kind: "area", why: "The weakest borrowers crack first."},
@@ -272,17 +324,19 @@ const TABS = [
   {id: "fx", label: "Currencies", lede: "The old rule (strong dollar, every currency falls) is breaking. 55% of DXY is the euro, so also watch the yuan, yen and rupee separately.", cards: [
     {t: "US Dollar Index (DXY)", s: ["Y:DX-Y.NYB"], why: "Mostly a euro story."},
     {t: "Broad trade-weighted dollar (Fed)", s: ["DTWEXBGS"], why: "A wider basket than DXY, closer to the dollar's true strength."},
-    {t: "USD/CNY", s: ["Y:USDCNY=X"], why: "Falling line = yuan strengthening, which he sees as part of the de-dollarisation shift."},
+    {t: "USD/CNY", s: ["Y:USDCNY=X"], why: "Falling line = yuan strengthening, part of the de-dollarisation shift."},
     {t: "USD/JPY", s: ["Y:USDJPY=X"]},
     {t: "EUR/USD", s: ["Y:EURUSD=X"]},
     {t: "USD/KRW", s: ["Y:USDKRW=X"], why: "Asian currencies outside China (ADXY proxy)."},
     {t: "USD/INR", s: ["Y:USDINR=X"]},
     {t: "JPY/INR", s: ["Y:JPYINR=X"]},
-    {t: "USD/BRL", s: ["Y:USDBRL=X"], why: "Latin America, his favourite region outside India."},
+    {t: "USD/BRL", s: ["Y:USDBRL=X"], why: "Latin America: high real rates and resources."},
   ]},
-  {id: "cmdty", label: "Energy and commodities", lede: "\"Higher oil prices always suck away the liquidity from every other asset class.\" Short term inflationary, long term deflationary.", cards: [
+  {id: "cmdty", label: "Energy and commodities", lede: "Higher oil prices drain liquidity from every other asset class: inflationary in the short term, deflationary in the long term. Shaded bands show where each price sits against its own history; pick 10Y, 20Y or Max to change the benchmark.", cards: [
     {t: "Brent and WTI crude (spot, long history)", s: ["DCOILBRENTEU", "DCOILWTICO"], why: "EIA spot prices since 1986-87, about a week behind futures."},
     {t: "Brent and WTI futures", s: ["Y:BZ=F", "Y:CL=F"]},
+    {t: "Brent crude vs its history", s: ["DCOILBRENTEU"], why: "EIA spot. Above +1σ has historically squeezed India's current account and the rupee."},
+    {t: "WTI crude vs its history", s: ["DCOILWTICO"]},
     {t: "US commercial crude inventories", s: ["WCESTUS1"], kind: "area", why: "Weekly EIA data. Low stocks leave no buffer if the war drags on."},
     {t: "US Strategic Petroleum Reserve", s: ["WCSSTUS1"], kind: "area", why: "Drawdowns are close to the limit; the runway for releases is short."},
     {t: "US natural gas", s: ["Y:NG=F"]},
@@ -295,9 +349,9 @@ const TABS = [
     {t: "Wheat", s: ["Y:ZW=F"], why: "Food inflation and fertiliser route risk."},
     {t: "Bitcoin", s: ["Y:BTC-USD"]},
   ]},
-  {id: "gold", label: "Gold and reserves", lede: "Central banks, led by China and Russia, keep adding gold. Ritesh expects gold to drift back to being a government-to-government monetary asset."},
+  {id: "gold", label: "Gold and reserves", lede: "Central banks, led by China and Russia, keep adding gold. Gold is drifting back towards being a government-to-government monetary asset."},
   {id: "global", label: "Global and AI", lede: "The US is 30% of world GDP but about 64% of world market cap, and AI is carrying it. If the AI trade deflates, money moves to the rest of the world.", cards: [
-    {t: "MSCI ACWI vs S&P 500", s: [R("Y:ACWI", "Y:^GSPC", "ACWI / S&P 500")], why: "Rising = rest of the world outperforming. He says this has started.", },
+    {t: "MSCI ACWI vs S&P 500", s: [R("Y:ACWI", "Y:^GSPC", "ACWI / S&P 500")], why: "Rising = rest of the world outperforming the US.", },
     {t: "Equal-weight vs cap-weight S&P 500", s: [R("Y:RSP", "Y:^GSPC", "RSP / S&P 500")], why: "Falling = concentration in a few mega caps. 8 stocks are about 45% of the S&P."},
     {t: "Emerging markets vs ACWI", s: [R("Y:EEM", "Y:ACWI", "EEM / ACWI")]},
     {t: "India vs emerging markets (USD)", s: [R("Y:INDA", "Y:EEM", "INDA / EEM")]},
@@ -306,10 +360,11 @@ const TABS = [
     {t: "Hyperscalers, rebased", s: ["Y:MSFT", "Y:GOOGL", "Y:AMZN", "Y:META"], rebase: true, why: "Buybacks have stopped and free cash flow has turned negative as capex rises."},
     {t: "Nvidia and semiconductors, rebased", s: ["Y:NVDA", "Y:SMH", "Y:ORCL"], rebase: true},
     {t: "Major indices, rebased", s: ["Y:^GSPC", "Y:^NSEI", "Y:^N225", "Y:^HSI"], rebase: true, why: "Local currency."},
-    {t: "Latin America (USD ETFs), rebased", s: ["Y:EWZ", "Y:ECH", "Y:EPU", "Y:ARGT"], rebase: true, why: "High positive real rates, resources, market reforms. His top region outside India."},
+    {t: "Latin America (USD ETFs), rebased", s: ["Y:EWZ", "Y:ECH", "Y:EPU", "Y:ARGT"], rebase: true, why: "High positive real rates, resources, market reforms."},
     {t: "Small caps vs large caps: Russell 2000 / S&P 500", s: [R("Y:^RUT", "Y:^GSPC", "Russell 2000 / S&P 500")]},
     {t: "Korea (KOSPI)", s: ["Y:^KS11"]},
   ]},
+  {id: "sectors", label: "Sectors and 50-year view"},
   {id: "watch", label: "Events and themes"},
 ];
 
@@ -317,8 +372,9 @@ const TABS = [
 function snapPanel(p) {
   const ins = D.insights.map(i => `<div class="ins"><span class="tag">${i.tag}</span><div>${i.text}</div></div>`).join("");
   p.innerHTML = `<div class="bar"><div><h2>This week</h2><p class="lede">What moved and what is stretched. These are observations from the data, not buy or sell calls.</p></div></div>
-  <div class="insights">${ins}</div><h4 class="sec">Ritesh's checklist</h4><div class="checks" id="checks"></div>
-  <h4 class="sec">Weekly snapshot</h4><div class="tw"><table id="snapT"></table></div>`;
+  <div class="insights">${ins}</div><h4 class="sec">Macro checklist</h4><div class="checks" id="checks"></div>
+  <h4 class="sec">Weekly snapshot</h4><div class="tw"><table id="snapT"></table></div>
+  <h4 class="sec">Where today sits against history</h4><p class="lede" style="margin:-4px 0 8px">z = distance from the median in standard deviations. Beyond ±1σ is unusual, beyond ±2σ is rare. Percentile = share of past readings below today.</p><div class="tw"><table id="histT"></table></div>`;
   $("#checks", p).innerHTML = checklist().map(c => `<div class="chk"><div class="name">${c.name}</div><div class="state ${c.s}">${c.s === "good" ? "&#9679;" : c.s === "warn" ? "&#9650;" : "&#9632;"} ${c.label}</div><div class="det">${c.det}</div></div>`).join("");
   const unit = k => k === "pct" ? "%" : k === "bp" ? " bp" : "";
   const cell = (v, k) => v == null ? `<td>n/a</td>` : `<td class="${v > 0 ? "up" : v < 0 ? "down" : ""}">${v > 0 ? "+" : ""}${fmt(v, k === "bp" ? 0 : 1)}${unit(k)}</td>`;
@@ -331,6 +387,13 @@ function snapPanel(p) {
     }
   }
   $("#snapT", p).innerHTML = h + "</tbody>";
+  const zc = z => z == null ? "<td>n/a</td>" : `<td><span class="chip ${Math.abs(z) >= 2 ? "hot" : Math.abs(z) >= 1 ? "warm" : ""}">${z > 0 ? "+" : ""}${fmt(z, 1)}σ</span></td>`;
+  let hh = `<thead><tr><th>Indicator</th><th>Latest</th><th>As of</th><th>Median</th><th>z (full history)</th><th>Percentile</th><th>z (10 years)</th><th>Percentile (10Y)</th><th>Since</th></tr></thead><tbody>`;
+  for (const g of D.history || []) {
+    hh += `<tr class="grp"><td colspan="9">${g.group}</td></tr>`;
+    for (const r of g.rows) hh += `<tr><td>${r.label}</td><td>${smart(r.last)}</td><td>${r.asof}</td><td>${smart(r.med)}</td>${zc(r.z)}<td>${fmt(r.pct, 0)}</td>${zc(r.z10)}<td>${r.pct10 == null ? "n/a" : fmt(r.pct10, 0)}</td><td>${r.since}</td></tr>`;
+  }
+  $("#histT", p).innerHTML = hh + "</tbody>";
 }
 function spark(v) {
   v = (v || []).filter(x => x != null); if (v.length < 2) return "";
@@ -406,19 +469,115 @@ function breadthPanel(p) {
   sortable($("#secT", p));
 }
 function flowsPanel(p) {
-  const f = D.flows || [];
-  const days = [...new Set(f.map(r => r.date))].sort();
-  const byCat = c => ({d: "pts", pts: days.map(d => { const r = f.find(x => x.date === d && x.category === c); return [new Date(d).getTime(), r ? r.net : null]; }).filter(x => x[1] != null), name: c + " net (INR cr)", src: "NSE"});
-  p.innerHTML = `<div class="bar"><div><h2>FII / DII flows</h2><p class="lede">Cash-market net buying by foreign and domestic institutions. NSE publishes only the latest day, so this history builds up one session at a time from 23 Oct 2026 as the site refreshes each weekday. FII selling has been concentrated in large IT, banks and oil and gas, while their holdings spread to more mid and small caps.</p></div></div><div class="grid" id="fg"></div>
-  <h4 class="sec">Recorded sessions</h4><div class="tw"><table id="fT"></table></div>`;
+  const C = D.category, DOM = ["Mutual funds", "Insurance", "Banks", "AIFs", "PMS"];
+  const pts = (blk, f) => blk ? blk.dates.map((d, i) => [new Date(d).getTime(), f(i)]).filter(x => x[1] != null && !isNaN(x[1])) : [];
+  const catSpec = (blk, nm, label) => ({d: "pts", pts: pts(blk, i => blk[nm] ? blk[nm][i] : null), name: label || nm, src: "NSE category-wise turnover", unit: "INR cr"});
+  const domSpec = blk => ({d: "pts", pts: pts(blk, i => DOM.reduce((a, k) => a + (blk[k] && blk[k][i] != null ? blk[k][i] : 0), 0)), name: "Domestic institutions", src: "NSE category-wise turnover", unit: "INR cr"});
+  const roll = (id, n) => { const r = raw(id) || []; return {d: "pts", pts: r.map((x, i) => i >= n - 1 ? [x[0], r.slice(i - n + 1, i + 1).reduce((a, y) => a + y[1], 0)] : null).filter(Boolean), name: "FPI equity, rolling 12 months", src: "NSDL (derived)", unit: "INR cr"}; };
+  p.innerHTML = `<div class="bar"><div><h2>FII / DII flows</h2><p class="lede">Foreign flows come from NSDL, the depository, monthly since 2002. Domestic institutions (mutual funds, insurers, banks, AIFs and PMS) and the foreign/domestic split come from NSE's daily category-wise cash turnover, which has this detail from February 2023. Totals differ slightly from the provisional NSE + BSE figures quoted in the press.</p></div>${rangeBar()}</div><div class="grid" id="fg"></div>
+  <h4 class="sec">Monthly net buying by category, NSE cash market (INR cr)</h4><div class="tw"><table id="fT"></table></div>
+  <h4 class="sec">Daily provisional FII / DII, all exchanges (NSE)</h4><div class="tw"><table id="fD"></table></div>`;
   const g = $("#fg", p);
-  g.appendChild(card({t: "FII and DII net flows", s: [byCat("FII"), byCat("DII")], kind: "bar", fixed: 99, wide: true, unit: "INR cr"}));
+  [{t: "FPI net investment in Indian equity, monthly", s: ["FPI_EQUITY"], kind: "bar", why: "NSDL, since 2002. Persistent red bars mark the big foreign exits (2008, 2022, 2024-26).", wide: true},
+   {t: "FPI equity flows, rolling 12-month sum", s: [roll("FPI_EQUITY", 12)], kind: "area", why: "Smooths out single months. Deeply negative readings have tended to come near market lows."},
+   {t: "FPI net investment in Indian debt, monthly", s: ["FPI_DEBT"], kind: "bar", why: "Index inclusion (JP Morgan, Bloomberg) drives the recent inflows."},
+   {t: "Foreign vs domestic institutions, monthly", s: [catSpec(C && C.monthly, "FPI", "FPI"), domSpec(C && C.monthly)], kind: "bar", why: "NSE cash market. Domestic money (mostly SIP-fed mutual funds) has absorbed most foreign selling since 2023."},
+   {t: "Mutual funds, insurers and retail, monthly", s: [catSpec(C && C.monthly, "Mutual funds"), catSpec(C && C.monthly, "Insurance"), catSpec(C && C.monthly, "Retail")], kind: "bar"},
+   {t: "Daily: FPI vs domestic institutions, last 4 months", s: [catSpec(C && C.daily, "FPI", "FPI"), domSpec(C && C.daily)], kind: "bar", wide: true},
+  ].forEach(c => { if (c.s.every(s => (get(s) || []).length)) g.appendChild(card(c)); });
+  if (C && C.monthly) {
+    const cats = ["FPI", ...DOM, "Retail"].filter(k => C.monthly[k]);
+    const n = C.monthly.dates.length, cell = v => v == null ? "<td>n/a</td>" : `<td class="${v > 0 ? "up" : v < 0 ? "down" : ""}">${fmt(v, 0)}</td>`;
+    let h = `<thead><tr><th>Month</th>${cats.map(k => `<th>${k}</th>`).join("")}<th>Domestic institutions</th></tr></thead><tbody>`;
+    for (let i = n - 1; i >= Math.max(0, n - 36); i--) {
+      const dom = DOM.reduce((a, k) => a + (C.monthly[k] && C.monthly[k][i] != null ? C.monthly[k][i] : 0), 0);
+      h += `<tr><td>${new Date(C.monthly.dates[i]).toLocaleDateString("en-GB", {month: "short", year: "numeric"})}</td>${cats.map(k => cell(C.monthly[k][i])).join("")}${cell(dom)}</tr>`;
+    }
+    $("#fT", p).innerHTML = h + "</tbody>";
+  }
+  const f = D.flows || [], days = [...new Set(f.map(r => r.date))].sort();
   let h = `<thead><tr><th>Date</th><th>FII buy</th><th>FII sell</th><th>FII net</th><th>DII buy</th><th>DII sell</th><th>DII net</th></tr></thead><tbody>`;
   for (const d of days.slice().reverse()) {
     const a = f.find(x => x.date === d && x.category === "FII") || {}, b = f.find(x => x.date === d && x.category === "DII") || {};
     h += `<tr><td>${d}</td><td>${fmt(a.buy, 0)}</td><td>${fmt(a.sell, 0)}</td><td class="${a.net > 0 ? "up" : "down"}">${fmt(a.net, 0)}</td><td>${fmt(b.buy, 0)}</td><td>${fmt(b.sell, 0)}</td><td class="${b.net > 0 ? "up" : "down"}">${fmt(b.net, 0)}</td></tr>`;
   }
-  $("#fT", p).innerHTML = h + "</tbody>";
+  $("#fD", p).innerHTML = h + "</tbody>";
+}
+function customCard(title, why, src, h, render, wide) {
+  const div = document.createElement("div"); div.className = "card" + (wide ? " wide" : "");
+  div.innerHTML = `<h3>${title}</h3>${why ? `<p class="why">${why}</p>` : ""}<div class="ctl"></div><div class="chart" style="height:${h || 260}px"></div><div class="src">Source: ${src}</div>`;
+  div._card = {el: div.querySelector(".chart"), cfg: {}, custom: el => {
+    const ch = echarts.getInstanceByDom(el) || echarts.init(el); if (!charts.includes(ch)) charts.push(ch); render(ch, div);
+  }};
+  return div;
+}
+function sectorsPanel(p) {
+  const S = D.sectors;
+  if (!S || !S.us) { p.innerHTML = `<p class="lede">Sector data was not available in this run.</p>`; return; }
+  const G = S.groups, us = S.us, IN = S.india || {};
+  const usAt = yr => { let i = us.dates.findIndex(d => d.startsWith(String(yr) + "-12")); if (i < 0) i = us.dates.length - 1; return Object.fromEntries(G.map(g => [g, us[g][i]])); };
+  const last = us.dates.length - 1, usNow = Object.fromEntries(G.map(g => [g, us[g][last]]));
+  const decades = [1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020].filter(y => us.dates.some(d => d.startsWith(y + "-12")));
+  const cons = S.consumption || {}, sc = S.scenarios || [], now = S.india_now || {};
+  p.innerHTML = `<div class="bar"><div><h2>Sectors and the 50-year view</h2><p class="lede">How a market's sector mix changes as an economy gets richer. The US mix by decade comes from every listed US stock (Fama-French 49 industries, monthly since 1926), grouped into the same sectors as India's Nifty 500. The bottom half projects India's real consumption per head and finds the year the US was at that level, as an analogy for India's sector mix in 10, 25 and 50 years. It is a lens, not a forecast.</p></div></div><div class="grid" id="sg"></div>`;
+  const g = $("#sg", p);
+  // 1. heat table of sector shares by decade
+  const tbl = document.createElement("div"); tbl.className = "card wide";
+  const heat = v => `background:color-mix(in srgb, var(--heat1) ${Math.min(100, Math.round(v * 2.2))}%, var(--heat0))`;
+  const cols = [...decades.map(y => ({h: "US " + y, v: usAt(y)})), {h: "US " + S.us_latest, v: usNow}, {h: "India now", v: IN}];
+  tbl.innerHTML = `<h3>Share of total market cap by sector (%)</h3><p class="why">US columns are year-end; India is today's Nifty 500 (${S.india_n || "n/a"} stocks, total INR ${fmt((S.india_mcap_cr || 0) / 1e5, 0)} lakh cr). Darker = bigger share. Before 1972 the US data covers NYSE stocks only (AMEX from 1962); most banks then traded over the counter, so early financials look small.</p>
+  <div class="tw"><table><thead><tr><th>Sector</th>${cols.map(c => `<th>${c.h}</th>`).join("")}</tr></thead><tbody>${G.map(gr => `<tr><td>${gr}</td>${cols.map(c => c.v[gr] == null ? "<td>n/a</td>" : `<td style="${heat(c.v[gr])}">${fmt(c.v[gr], 1)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+  <div class="src">Source: Kenneth R. French data library (CRSP), NSE, Yahoo Finance market caps</div>`;
+  g.appendChild(tbl);
+  // 2. one sector through time
+  g.appendChild(customCard("One sector through time: US share vs India today", "Pick a sector. The line is its share of US market cap each year; the dashed line is India's share today.", "Kenneth R. French data library, NSE", 280, (ch, div) => {
+    const ctl = div.querySelector(".ctl");
+    if (!ctl.firstChild) { ctl.innerHTML = `<select aria-label="Sector">${G.map(x => `<option${x === "Technology" ? " selected" : ""}>${x}</option>`).join("")}</select>`; ctl.firstChild.onchange = () => div._card.custom(div._card.el); }
+    const gr = ctl.firstChild.value, o = baseOpt(); o.grid.top = 14;
+    o.series = [{name: "US share (%)", type: "line", showSymbol: false, data: us.dates.map((d, i) => [new Date(d + "-28").getTime(), us[gr][i]]), lineStyle: {width: 2, color: css("--s1")}, itemStyle: {color: css("--s1")},
+      markLine: IN[gr] != null ? {silent: true, symbol: "none", label: {show: true, formatter: `India today ${fmt(IN[gr], 1)}%`, color: css("--muted"), position: "insideEndTop"}, lineStyle: {type: "dashed", color: css("--s3")}, data: [{yAxis: IN[gr]}]} : undefined}];
+    o.yAxis.scale = false; ch.setOption(o, true);
+  }));
+  // 3. consumption per head, actual and projected
+  if (cons.years) {
+    const names = {US: "United States", KR: "Korea", CN: "China", IN: "India"};
+    g.appendChild(customCard("Real household consumption per head (constant 2015 USD, log scale)", `India was at USD ${fmt(now.value, 0)} in ${now.year}. Dashed lines project India at 4%, 5% and 6% real growth a year.`, "World Bank (NE.CON.PRVT.PC.KD), BEA via FRED for the US before 1970", 300, ch => {
+      const o = baseOpt(); o.yAxis = {...o.yAxis, type: "log", scale: true};
+      o.legend = {top: 0, left: 0, itemWidth: 12, itemHeight: 3, icon: "rect", textStyle: {color: css("--muted"), fontSize: 11}};
+      o.series = Object.keys(names).filter(k => cons[k]).map((k, i) => ({name: names[k], type: "line", showSymbol: false, data: cons.years.map((y, j) => [Date.UTC(y, 6, 1), cons[k][j]]).filter(x => x[1]), lineStyle: {width: 2, color: css(SCOL[i])}, itemStyle: {color: css(SCOL[i])}}));
+      const inCol = css(SCOL[Object.keys(names).indexOf("IN")]);
+      [4, 5, 6].forEach(gr => o.series.push({name: `India at ${gr}%`, type: "line", showSymbol: false, data: [0, 10, 20, 30, 40, 50].map(k => [Date.UTC(now.year + k, 6, 1), now.value * (1 + gr / 100) ** k]), lineStyle: {width: 1.5, type: "dashed", color: inCol}, itemStyle: {color: inCol},
+        endLabel: {show: true, formatter: `${gr}%`, color: css("--muted"), fontSize: 10}}));
+      o.grid.right = 30; ch.setOption(o, true);
+    }));
+  }
+  // 4. scenario table
+  if (sc.length) {
+    const st = document.createElement("div"); st.className = "card";
+    const hz = [...new Set(sc.map(x => x.year))];
+    st.innerHTML = `<h3>India's consumption per head under three growth paths</h3><p class="why">Each cell: USD per head (constant 2015), multiple of today, and the year the US was at the same level.</p>
+    <div class="tw"><table><thead><tr><th>Real growth a year</th>${hz.map(y => `<th>${y}</th>`).join("")}</tr></thead><tbody>${[4, 5, 6].map(gr => `<tr><td>${gr}%</td>${hz.map(y => { const x = sc.find(z => z.growth === gr && z.year === y); return `<td>${fmt(x.value, 0)} (${fmt(x.multiple, 1)}x)<br><span class="u">US in ${x.us_before ? "before " : ""}${x.us_year || "n/a"}</span></td>`; }).join("")}</tr>`).join("")}</tbody></table></div>
+    <div class="src">Source: World Bank, BEA via FRED (computed)</div>`;
+    g.appendChild(st);
+  }
+  // 5. where the mix could move
+  if (sc.length && Object.keys(IN).length) {
+    g.appendChild(customCard("Where India's sector mix could move: US mix at the same consumption level minus India today", "Pick a growth path and horizon. Green bars: sectors that were a bigger share of the US market when Americans consumed what Indians may consume then. Red: sectors where India is already heavier.", "Kenneth R. French data library, NSE, World Bank (computed)", 420, (ch, div) => {
+      const ctl = div.querySelector(".ctl");
+      if (!ctl.firstChild) {
+        ctl.innerHTML = `<select aria-label="Scenario">${sc.map((x, i) => `<option value="${i}"${x.growth === 5 && x.year === now.year + 50 ? " selected" : ""}>${x.growth}% a year to ${x.year} (US ${x.us_year})</option>`).join("")}</select>`;
+        ctl.firstChild.onchange = () => div._card.custom(div._card.el);
+      }
+      const x = sc[+ctl.firstChild.value], u = usAt(x.us_year);
+      const rows = G.map(gr => ({gr, d: (u[gr] || 0) - (IN[gr] || 0), us: u[gr], ind: IN[gr]})).sort((a, b) => a.d - b.d);
+      const o = baseOpt(); o.grid = {left: 20, right: 40, top: 6, bottom: 4, containLabel: true};
+      o.tooltip = {...o.tooltip, trigger: "item", formatter: q => { const r = rows[q.dataIndex]; return `${r.gr}<br>US ${x.us_year}: ${fmt(r.us, 1)}%<br>India today: ${fmt(r.ind, 1)}%<br>Gap: ${fmt(r.d, 1)} pts`; }};
+      o.xAxis = {type: "value", axisLabel: {color: css("--muted"), fontSize: 11, formatter: v => v + " pts"}, splitLine: {lineStyle: {color: css("--grid")}}};
+      o.yAxis = {type: "category", data: rows.map(r => r.gr), axisLabel: {color: css("--muted"), fontSize: 11}, axisTick: {show: false}, axisLine: {lineStyle: {color: css("--line")}}};
+      o.series = [{type: "bar", barMaxWidth: 14, data: rows.map(r => ({value: +r.d.toFixed(1), itemStyle: {color: r.d < 0 ? css("--s3") : css("--s1"), borderRadius: r.d < 0 ? [4, 0, 0, 4] : [0, 4, 4, 0]}})), label: {show: true, position: "right", color: css("--muted"), fontSize: 11, formatter: q => (q.value > 0 ? "+" : "") + fmt(q.value, 1)}}];
+      ch.setOption(o, true);
+    }, true));
+  }
 }
 function goldPanel(p) {
   const g = D.gold;
@@ -452,10 +611,10 @@ function goldPanel(p) {
 }
 function watchPanel(p) {
   const e = D.events || {};
-  p.innerHTML = `<div class="bar"><div><h2>Events and themes</h2><p class="lede">From the SOIC podcast (21 Oct 2026). Edit <code>data/events.json</code> to keep this list current.</p></div></div>
+  p.innerHTML = `<div class="bar"><div><h2>Events and themes</h2><p class="lede">Edit <code>data/events.json</code> to keep this list current.</p></div></div>
   <h4 class="sec">Events to watch</h4><div class="list">${(e.events || []).map(x => `<div class="ev"><div class="d">${x.date}</div><div class="w">${x.what} <span class="chip">${x.region}</span></div><div class="y">${x.why}</div></div>`).join("")}</div>
-  <h4 class="sec">Long-term themes he is tracking</h4><div class="list">${(e.themes || []).map(x => `<div class="ev"><div class="d">Theme</div><div class="w">${x.name}</div><div class="y">${x.note}</div></div>`).join("")}</div>
-  <h4 class="sec">How he reads macro</h4><div class="list">
+  <h4 class="sec">Long-term themes to track</h4><div class="list">${(e.themes || []).map(x => `<div class="ev"><div class="d">Theme</div><div class="w">${x.name}</div><div class="y">${x.note}</div></div>`).join("")}</div>
+  <h4 class="sec">How to read the macro</h4><div class="list">
     <div class="ev"><div class="d">1</div><div class="w">Use nominal GDP, not real</div><div class="y">Real GDP has no meaning for corporate profitability. US runs about 7% nominal, India about 12%.</div></div>
     <div class="ev"><div class="d">2</div><div class="w">Bonds first</div><div class="y">Credit spreads, CDS and corporate bond yields flag trouble before equities do.</div></div>
     <div class="ev"><div class="d">3</div><div class="w">Think like the government</div><div class="y">Indebted governments want growth, reshoring, energy security and lower healthcare costs. Policy follows incentives.</div></div>
@@ -488,7 +647,7 @@ function build() {
       t.cards.forEach(c => { if (c.s.every(s => get(s) && get(s).length)) g.appendChild(card(c)); });
     }
   }
-  snapPanel(panels.snap); breadthPanel(panels.breadth); flowsPanel(panels.flows); goldPanel(panels.gold); watchPanel(panels.watch);
+  snapPanel(panels.snap); breadthPanel(panels.breadth); flowsPanel(panels.flows); goldPanel(panels.gold); sectorsPanel(panels.sectors); watchPanel(panels.watch);
   document.querySelectorAll(".ranges button").forEach(b => b.onclick = () => {
     RANGE = +b.dataset.y;
     document.querySelectorAll(".ranges button").forEach(x => x.setAttribute("aria-pressed", +x.dataset.y === RANGE));

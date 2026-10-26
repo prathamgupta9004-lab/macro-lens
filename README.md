@@ -2,7 +2,7 @@
 
 India and global macro dashboard, refreshed every weekday evening by GitHub Actions.
 
-Built on the framework Ritesh Jain set out on the SOIC podcast (21 Oct 2026): track nominal growth, read bond markets first, follow government incentives. The page states observations from the data, not buy or sell calls.
+Framework: track nominal growth, read bond markets first, follow government incentives. The page states observations from the data, not buy or sell calls.
 
 Live site: https://prathamgupta9004-lab.github.io/macro-lens/
 
@@ -11,7 +11,11 @@ Live site: https://prathamgupta9004-lab.github.io/macro-lens/
 - IMF (IRFCL and International Liquidity): central bank reserves and gold holdings by country
 - MOSPI (Government of India): CPI, IIP, WPI, quarterly GDP
 - EIA: US crude stocks and Strategic Petroleum Reserve
-- NSE: FII / DII cash flows, Nifty 500 constituents
+- NSE: FII / DII cash flows, daily category-wise turnover (FPI, mutual funds, insurers, banks, retail), index history, Nifty 500 constituents, total market cap
+- NSDL: monthly FPI net investment since 2002
+- RBI data via the IMF monetary survey: bank credit, deposits, broad money; BIS via FRED: credit to GDP
+- World Bank: market cap to GDP, real household consumption per head
+- Kenneth R. French data library: US market cap by industry since 1926
 - Yahoo Finance: index, currency, commodity and stock prices
 - RBI: policy repo rate
 

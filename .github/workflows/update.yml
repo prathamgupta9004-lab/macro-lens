@@ -1,8 +1,8 @@
 name: Update and deploy
 
 # NSE posts the day's FII / DII cash flows in the evening, so refresh at 8:30 pm IST
-# on weekdays. Each run fetches every source, saves the new FII / DII day to the
-# repository (NSE only shows the latest day) and redeploys the page.
+# on weekdays. Each run fetches every source, saves the new daily NSE history and a cache of
+# slow-moving series to the repository, and redeploys the page.
 on:
   schedule:
     - cron: "0 15 * * 1-5"
@@ -44,12 +44,12 @@ jobs:
         run: grep -E "^\s+!" data/fetch_log.txt || echo "No warnings"
         continue-on-error: true
 
-      - name: Save new FII / DII days to the repository
+      - name: Save new daily history to the repository
         run: |
           git config user.name "macro-lens-bot"
           git config user.email "macro-lens-bot@users.noreply.github.com"
-          git add data/fii_dii_history.csv
-          if git diff --cached --quiet; then echo "No new flow days"; else git commit -m "Data: FII / DII flows up to $(tail -1 data/fii_dii_history.csv | cut -d, -f1)" && git push; fi
+          git add data/fii_dii_history.csv data/nse_category_daily.csv data/nse_index_closes.csv data/series_cache.json
+          if git diff --cached --quiet; then echo "No new data"; else git commit -m "Data: daily update $(date -u +%Y-%m-%d)" && git push; fi
 
       - name: Build site
         run: python build.py
