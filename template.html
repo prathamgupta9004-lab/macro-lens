@@ -381,6 +381,7 @@ const TABS = [
   ]},
   {id: "sectors", label: "Sectors and 50-year view"},
   {id: "watch", label: "Events and themes"},
+  {id: "audit", label: "Data audit"},
 ];
 
 // ---------- special panels
@@ -780,6 +781,77 @@ function fpiYearly(p) {
     ch.setOption(o, true);
   }, true), g.children[1] || null);
 }
+// ---------- data audit: every chart, its source, how often the source publishes, and how fresh our copy is
+const CADENCE = [ // [test on series id / source, publishes, typical lag, max age in days (from the date the source stamps the point) before we flag it]
+  [id => /^Y:/.test(id), "Every trading day", "Same day", 7],
+  [id => /^(DGS|DFII|T10|DFF|BAML|BAA|AAA|DTWEX|DEXINUS|DCOIL|RRP)/.test(id), "Every business day", "1 to 7 days (FRED)", 16],
+  [id => /^(ICSA|WALCL|WTREGEN|NETLIQ|MORTGAGE30US|WCESTUS1|WCSSTUS1)$/.test(id), "Weekly", "About 1 week", 21],
+  [id => /^(IN_CPI|IN_CORE_CPI|IN_CPI_FOOD|IN_CPI_INDEX|IN_WPI)/.test(id), "Monthly (around the 12th-14th)", "About 2 weeks after month end", 80],
+  [id => /^IN_IIP/.test(id), "Monthly (around the 28th)", "About 4 weeks after month end", 125],
+  [id => /^(IN_GDP|IN_DEFL|IN_GFCF|IN_PFCE|IN_GFCE)/.test(id), "Quarterly (end of Feb, May, Aug, Nov)", "About 2 months after quarter end", 200],
+  [id => /^BOP_/.test(id), "Quarterly", "About 3 months after quarter end", 280],
+  [id => /^RBI_|^credit:/.test(id), "Monthly, about 1 month after the reporting date", "4 to 5 weeks", 95],
+  [id => /^(IN_CREDIT|IN_DEPOSITS|IN_CD_RATIO|IN_M3_YOY)/.test(id) && !/GDP/.test(id), "Monthly (RBI via IMF)", "About 2 months", 130],
+  [id => /CREDIT_GDP$/.test(id), "Quarterly (BIS)", "About 6 months", 330],
+  [id => /^FPI_|^nse:/.test(id), "Every trading day, summed by month", "1 day", 45],
+  [id => /^(IND_RES|gold:)/.test(id), "Monthly (IMF)", "1 to 3 months", 130],
+  [id => /^IN_MCAP_GDP_WB$/.test(id), "Annual (World Bank)", "About 1 year", 800],
+  [id => /^(US_MCAP_GDP|GDP|GDPC1|DRC|GFDEG|VAPGDP|NCBE)/.test(id), "Quarterly", "2 to 3 months after quarter end", 300],
+  [id => /^FYFSG/.test(id), "Annual (US fiscal year)", "About 4 months", 800],
+  [id => /^INDIRL|^IRLTLT/.test(id), "Monthly (OECD via FRED)", "About 1 month", 100],
+  [id => /^(CPIAUCSL|CPILFESL|PCEPILFE|UNRATE|PAYEMS|HOUST|INDPRO|M2SL)$/.test(id), "Monthly", "2 to 6 weeks", 100],
+  [id => /^(TRI:|NSE:|R:|IN_MCAP_GDP$|breadth)/.test(id), "Every trading day", "Same day", 7],
+];
+function cadenceOf(id) { for (const [f, pub, lag, age] of CADENCE) if (f(id)) return {pub, lag, age}; return {pub: "Varies", lag: "", age: 120}; }
+function auditPanel(p) {
+  const rows = [], today = Date.now();
+  const sidOf = s => typeof s === "string" ? [s] : (s.a ? [s.a, s.b] : []);
+  const ptsKey = s => /RBI/.test(s.src || "") ? "credit:" : /NSDL/.test(s.src || "") ? "FPI_" : /IMF IRFCL/.test(s.src || "") ? "gold:" : /MOSPI/.test(s.src || "") ? "IN_CPI_INDEX" : /NSE category/.test(s.src || "") ? "nse:" : "breadth";
+  for (const t of TABS) {
+    if (["snap", "watch", "audit"].includes(t.id)) continue;
+    for (const c of panels[t.id].querySelectorAll(".card")) {
+      const title = (c.querySelector("h3") || {}).textContent || "";
+      const cfg = c._card && c._card.cfg && c._card.cfg.s ? c._card.cfg : null;
+      const srcTxt = ((c.querySelector(".src") || {}).textContent || "").replace(/^Source:\s*/, "").split(" · ")[0];
+      let last = null, keys = [];
+      if (cfg) {
+        for (const s of cfg.s) {
+          if (s.d === "pts") { keys.push(ptsKey(s)); const lp = s.pts && s.pts.length ? s.pts[s.pts.length - 1][0] : null; if (lp && lp <= today) last = Math.max(last || 0, lp); continue; }
+          for (const id of sidOf(s)) { keys.push(id); const se = D.series[id]; if (se && se.data.length) { const lp = new Date(se.data[se.data.length - 1][0]).getTime(); last = last == null ? lp : Math.min(last, lp); } }
+        }
+      } else keys.push(t.id === "credit" ? "credit:" : t.id === "gold" ? "gold:" : t.id === "flows" ? "FPI_" : t.id === "inflation" ? "IN_CPI_INDEX" : t.id === "sectors" ? "sectors" : "breadth");
+      // the slowest-publishing input sets the expected freshness of the chart
+      const cads = keys.map(cadenceOf), cad = cads.reduce((a, b) => b.age > a.age ? b : a, cads[0] || cadenceOf(""));
+      const age = last ? Math.round((today - last) / 864e5) : null;
+      const status = t.id === "sectors" ? ["good", "Structural"] : age == null ? ["good", "Current"] : age <= cad.age ? ["good", "Current"] : age <= cad.age * 1.5 ? ["warn", "Lagging"] : ["bad", "Stale"];
+      rows.push({tab: t.label, title, src: srcTxt, pub: t.id === "sectors" ? "Annual / monthly" : cad.pub, lag: cad.lag,
+        last: last ? new Date(last).toLocaleDateString("en-GB", {day: "2-digit", month: "short", year: "numeric"}) : (t.id === "sectors" ? "Updated each run" : "Latest run"), status});
+    }
+  }
+  const n = s => rows.filter(r => r.status[0] === s).length;
+  p.innerHTML = `<div class="bar"><div><h2>Data audit</h2><p class="lede">Every chart on the site, where its data comes from, how often that source publishes, and the date of the latest point we hold. The site refreshes every weekday at 8:30 pm IST and re-downloads every source, so new official releases appear the same evening they are published. A chart is flagged Lagging or Stale if its newest point is older than the source's normal publishing cycle allows. Checked ${D.generated}.</p></div></div>
+  <div class="checks"><div class="chk"><div class="name">Charts audited</div><div class="state good">${rows.length}</div></div>
+  <div class="chk"><div class="name">Current</div><div class="state good">&#9679; ${n("good")}</div></div>
+  <div class="chk"><div class="name">Lagging</div><div class="state warn">&#9650; ${n("warn")}</div></div>
+  <div class="chk"><div class="name">Stale</div><div class="state bad">&#9632; ${n("bad")}</div></div></div>
+  <h4 class="sec">Sources and refresh</h4><div class="tw"><table id="auS"></table></div>
+  <h4 class="sec">Every chart</h4><div class="tw"><table id="auT"></table></div>`;
+  const SRC = [
+    ["MOSPI (Government of India)", "CPI (base 2024 and 2012), WPI, IIP, quarterly GDP and components", "CPI and WPI monthly (mid-month), IIP monthly (month end), GDP quarterly"],
+    ["RBI", "Sector-wise bank credit (monthly releases since 2010), policy repo rate", "Monthly, about a month after the reporting Friday"],
+    ["RBI via IMF", "Bank credit, deposits, M3 (monetary survey); quarterly balance of payments; reserves and gold holdings by country", "Monthly or quarterly, 1 to 3 months after the period"],
+    ["NSE and NSE Indices", "FII / DII flows, category-wise turnover, index history (TRI since 2005, Nifty 50 since 1990), Nifty 500 list, total market cap", "Every trading day"],
+    ["NSDL", "FPI net investment in equity and debt since 2002", "Every trading day, shown monthly"],
+    ["FRED (St. Louis Fed)", "US growth, inflation, jobs, liquidity, Treasury yields, credit spreads, Fed Z.1, BIS credit to GDP, OECD yields", "Daily to quarterly, as each agency publishes"],
+    ["EIA", "US crude stocks and Strategic Petroleum Reserve", "Weekly (Wednesday)"],
+    ["World Bank", "India market cap to GDP, real consumption per head", "Annual"],
+    ["Kenneth R. French data library", "US market cap by industry since 1926", "Monthly, with a 1 to 2 month lag"],
+    ["Yahoo Finance", "Prices: indices, ETFs, stocks, currencies, commodity futures, Nifty 500 stocks", "Every trading day"],
+  ];
+  $("#auS", p).innerHTML = `<thead><tr><th>Source</th><th>What we take</th><th>How often it publishes</th><th>How often we check</th></tr></thead><tbody>${SRC.map(r => `<tr><td>${r[0]}</td><td style="text-align:left;white-space:normal">${r[1]}</td><td style="text-align:left;white-space:normal">${r[2]}</td><td>Every weekday, 8:30 pm IST</td></tr>`).join("")}</tbody>`;
+  $("#auT", p).innerHTML = `<thead><tr><th>Tab</th><th>Chart</th><th>Source</th><th>Source publishes</th><th>Typical lag</th><th>Latest data</th><th>Status</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.tab}</td><td style="text-align:left;white-space:normal;min-width:220px">${r.title}</td><td style="text-align:left;white-space:normal">${r.src}</td><td style="text-align:left">${r.pub}</td><td style="text-align:left">${r.lag}</td><td>${r.last}</td><td><span class="chip ${r.status[0] === "good" ? "" : r.status[0] === "warn" ? "warm" : "hot"}">${r.status[1]}</span></td></tr>`).join("")}</tbody>`;
+  sortable($("#auT", p));
+}
 function goldPanel(p) {
   const g = D.gold;
   if (!g) { p.innerHTML = `<p class="lede">IMF reserve data was not available in this run.</p>`; return; }
@@ -850,6 +922,7 @@ function build() {
   }
   snapPanel(panels.snap); breadthPanel(panels.breadth); flowsPanel(panels.flows); goldPanel(panels.gold); sectorsPanel(panels.sectors); watchPanel(panels.watch);
   inflationPanel(panels.inflation); creditPanel(panels.credit); returnsPanel(panels.returns); stockBreadth(panels.breadth); fpiYearly(panels.flows);
+  auditPanel(panels.audit);
   document.querySelectorAll(".ranges button").forEach(b => b.onclick = () => {
     RANGE = +b.dataset.y;
     document.querySelectorAll(".ranges button").forEach(x => x.setAttribute("aria-pressed", +x.dataset.y === RANGE));
