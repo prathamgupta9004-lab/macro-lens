@@ -1,0 +1,62 @@
+name: Update and deploy
+
+# NSE posts the day's FII / DII cash flows in the evening, so refresh at 8:30 pm IST
+# on weekdays. Each run fetches every source, saves the new FII / DII day to the
+# repository (NSE only shows the latest day) and redeploys the page.
+on:
+  schedule:
+    - cron: "0 15 * * 1-5"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["fetch.py", "build.py", "template.html", "data/events.json", ".github/workflows/**"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Fetch macro data
+        run: python fetch.py | tee data/fetch_log.txt
+
+      - name: Show fetch warnings
+        run: grep -E "^\s+!" data/fetch_log.txt || echo "No warnings"
+        continue-on-error: true
+
+      - name: Save new FII / DII days to the repository
+        run: |
+          git config user.name "macro-lens-bot"
+          git config user.email "macro-lens-bot@users.noreply.github.com"
+          git add data/fii_dii_history.csv
+          if git diff --cached --quiet; then echo "No new flow days"; else git commit -m "Data: FII / DII flows up to $(tail -1 data/fii_dii_history.csv | cut -d, -f1)" && git push; fi
+
+      - name: Build site
+        run: python build.py
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+      - id: deploy
+        uses: actions/deploy-pages@v4

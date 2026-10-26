@@ -1,0 +1,21 @@
+{
+  "note": "Edit this file to add or remove events. date can be exact (YYYY-MM-DD) or a month (YYYY-MM). Rebuild with build.py.",
+  "events": [
+    {"date": "2026-11-04", "what": "Possible end-point for the US-Iran conflict flagged in the podcast", "why": "An end to the war is the single biggest swing factor for oil, the rupee and RBI rates", "region": "Global"},
+    {"date": "2026-11", "what": "US midterm elections", "why": "Prediction markets give a high chance of a change in House control; policy and fiscal path at stake", "region": "US"},
+    {"date": "2026-12", "what": "PM visit to Canada, possible India-Canada FTA", "why": "Access to Alberta energy; energy security for 12% nominal growth", "region": "India"},
+    {"date": "2027-01-01", "what": "India-EU FTA expected to take effect", "why": "New export winners in engineering, textiles, chemicals; jobs that went to LDCs can return", "region": "India"},
+    {"date": "2026-11", "what": "India-US trade deal (\"weeks away\")", "why": "Tariff relief for exporters; possible link to Treasury holdings", "region": "India"},
+    {"date": "2026-10", "what": "Brazil presidential election", "why": "Latin America's shift to the right plus high real rates is his top region outside India", "region": "LatAm"},
+    {"date": "ongoing", "what": "India-UK and India-New Zealand FTAs in force", "why": "Engineering goods exports heading to $150 bn; Q1 up 34%", "region": "India"}
+  ],
+  "themes": [
+    {"name": "Electrification and grid", "note": "Needed for reshoring in India and the US; some names are in time correction, let earnings catch up"},
+    {"name": "Engineering, precision engineering, defence", "note": "Manufacturing share of GDP rising; government-backed"},
+    {"name": "Wealth management", "note": "Capital-light, less regulatory overreach than banks and insurers"},
+    {"name": "FTA beneficiaries", "note": "UK, NZ, EU, US, Canada deals create new export winners"},
+    {"name": "Healthcare and pharma (AI-led)", "note": "Governments want AI to cut healthcare cost; CDMO RFQs surging"},
+    {"name": "Tourism", "note": "Structural demand, but capacity is the constraint"},
+    {"name": "Latin America", "note": "Positive real rates, resources, right-leaning reforms: Chile, Peru, Argentina, Brazil"}
+  ]
+}

@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Macro Lens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f9f9f9;--card:#ffffff;--ink:#171717;--head:#111111;--muted:#646464;--faint:#8d8d8d;
+  --line:#e8e8e8;--grid:#efefef;--tint:#ecfdf5;--tintline:#d1fae5;
+  --brand:#1e4d3d;--brand-deep:#064e3b;--cta:#059669;
+  --s1:#059669;--s2:#2a78d6;--s3:#eb6834;--s4:#6250d6;
+  --up:#047857;--down:#b42318;
+  --good-bg:#ecfdf5;--good-ink:#065f46;--warn-bg:#fefce9;--warn-ink:#9e6c00;--bad-bg:#fef2f2;--bad-ink:#b42318;
+  --heat0:#f7fdfa;--heat1:#059669;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#121413;--card:#1a1a19;--ink:#ecebe8;--head:#f5f5f3;--muted:#b0afa8;--faint:#8a8984;
+    --line:#2c2d2b;--grid:#252624;--tint:#10241c;--tintline:#1d3b2f;
+    --brand:#6ee7b7;--brand-deep:#a7f3d0;--cta:#10b981;
+    --s1:#199e70;--s2:#3987e5;--s3:#d95926;--s4:#9085e9;
+    --up:#34d399;--down:#f87171;
+    --good-bg:#0f2a20;--good-ink:#6ee7b7;--warn-bg:#2a2410;--warn-ink:#facc15;--bad-bg:#2d1414;--bad-ink:#fca5a5;
+    --heat0:#1a1a19;--heat1:#10b981;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#121413;--card:#1a1a19;--ink:#ecebe8;--head:#f5f5f3;--muted:#b0afa8;--faint:#8a8984;
+  --line:#2c2d2b;--grid:#252624;--tint:#10241c;--tintline:#1d3b2f;
+  --brand:#6ee7b7;--brand-deep:#a7f3d0;--cta:#10b981;
+  --s1:#199e70;--s2:#3987e5;--s3:#d95926;--s4:#9085e9;
+  --up:#34d399;--down:#f87171;
+  --good-bg:#0f2a20;--good-ink:#6ee7b7;--warn-bg:#2a2410;--warn-ink:#facc15;--bad-bg:#2d1414;--bad-ink:#fca5a5;
+  --heat0:#1a1a19;--heat1:#10b981;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.hero{background:radial-gradient(120% 140% at 0% 0%,#0b6b4f 0%,#064e3b 45%,#04382a 100%);color:#ecfdf5;padding:28px 24px 22px}
+.hero-in{max-width:1440px;margin:0 auto;display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
+.hero h1{margin:0;font-weight:500;font-size:28px;letter-spacing:-.01em}
+.hero p{margin:4px 0 0;color:#a7f3d0;font-size:14px}
+.stamp{font-size:13px;color:#d1fae5;text-align:right}
+.stamp b{font-weight:500;color:#fff}
+.theme-btn{margin-top:6px;background:rgba(255,255,255,.12);color:#ecfdf5;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:4px 12px;font:inherit;font-size:12px;cursor:pointer}
+nav{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--line)}
+.nav-in{max-width:1440px;margin:0 auto;padding:10px 16px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.tab{flex:none;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:6px 14px;font:inherit;font-weight:500;font-size:13px;cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--ink);border-color:var(--tintline)}
+.tab[aria-selected="true"]{background:var(--cta);border-color:var(--cta);color:#fff}
+main{max-width:1440px;margin:0 auto;padding:16px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:4px 0 14px}
+.bar h2{margin:0;font-size:20px;font-weight:500;color:var(--head)}
+.bar .lede{color:var(--muted);font-size:13px;margin:2px 0 0;max-width:820px}
+.ranges{display:flex;gap:4px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px}
+.ranges button{border:0;background:none;color:var(--muted);font:inherit;font-size:12px;font-weight:500;padding:4px 10px;border-radius:999px;cursor:pointer}
+.ranges button[aria-pressed="true"]{background:var(--tint);color:var(--brand)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px 10px;min-width:0}
+.card.wide{grid-column:1/-1}
+.card h3{margin:0;font-size:14px;font-weight:500;color:var(--head)}
+.card .why{margin:2px 0 6px;font-size:12px;color:var(--muted);line-height:1.45}
+.kv{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:4px 0 2px}
+.kv .v{font-size:22px;font-weight:500;color:var(--head);font-variant-numeric:tabular-nums}
+.kv .u{font-size:12px;color:var(--faint)}
+.chip{font-size:12px;font-weight:500;border-radius:999px;padding:1px 8px;font-variant-numeric:tabular-nums;background:var(--bg);color:var(--muted)}
+.chip.up{color:var(--up)} .chip.down{color:var(--down)}
+.chart{height:240px;width:100%}
+.src{font-size:11px;color:var(--faint);margin-top:2px}
+.panel{display:none}.panel.on{display:block}
+.insights{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;margin-bottom:16px}
+.ins{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:13px}
+.ins .tag{display:inline-block;font-size:11px;font-weight:500;color:var(--brand);background:var(--tint);border-radius:999px;padding:0 8px;margin-bottom:4px}
+.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:16px}
+.chk{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.chk .name{font-size:12px;color:var(--muted)}
+.chk .state{display:inline-flex;gap:6px;align-items:center;font-weight:500;font-size:13px;border-radius:999px;padding:2px 10px;margin:4px 0}
+.state.good{background:var(--good-bg);color:var(--good-ink)}.state.warn{background:var(--warn-bg);color:var(--warn-ink)}.state.bad{background:var(--bad-bg);color:var(--bad-ink)}
+.chk .det{font-size:12px;color:var(--muted)}
+h4.sec{font-size:13px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 8px}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:14px}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+th{font-weight:500;color:var(--muted);font-size:12px;background:var(--card);position:sticky;top:0;cursor:pointer;user-select:none}
+th:first-child,td:first-child{text-align:left}
+tr.grp td{background:var(--tint);color:var(--brand);font-weight:500;font-size:12px;text-align:left}
+td.up{color:var(--up)}td.down{color:var(--down)}
+.rng{display:inline-block;width:70px;height:6px;border-radius:3px;background:var(--grid);position:relative;vertical-align:middle}
+.rng i{position:absolute;top:-2px;width:4px;height:10px;border-radius:2px;background:var(--cta)}
+.spark{vertical-align:middle}
+.list{display:grid;gap:8px}
+.ev{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:grid;grid-template-columns:110px 1fr;gap:4px 14px}
+.ev .d{font-weight:500;color:var(--brand);font-size:13px}
+.ev .w{font-weight:500}.ev .y{grid-column:2;color:var(--muted);font-size:12px}
+.foot{color:var(--faint);font-size:12px;margin:24px 0 8px;line-height:1.6}
+@media (max-width:640px){
+  .grid{grid-template-columns:1fr}.hero{padding:20px 16px}.hero h1{font-size:23px}
+  main{padding:12px 16px}.stamp{text-align:left}.ev{grid-template-columns:1fr}.ev .y{grid-column:1}
+  .insights,.checks{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<header class="hero"><div class="hero-in">
+  <div><h1>Macro Lens</h1><p>India and global macro in one place, refreshed every weekday evening. Built on Ritesh Jain's framework: nominal growth, bonds first, follow the government.</p></div>
+  <div class="stamp">Data as of <b id="gen"></b><br><button class="theme-btn" id="themeBtn" type="button">Toggle theme</button></div>
+</div></header>
+<nav><div class="nav-in" id="tabs" role="tablist"></div></nav>
+<main id="main"></main>
+<script>
+const D = /*__DATA__*/null;
+const $ = (s, el = document) => el.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (v, d = 2) => v == null || isNaN(v) ? "n/a" : Number(v).toLocaleString("en-IN", {minimumFractionDigits: d, maximumFractionDigits: d});
+const smart = v => v == null ? "n/a" : Math.abs(v) >= 1000 ? fmt(v, 0) : Math.abs(v) >= 100 ? fmt(v, 1) : fmt(v, 2);
+$("#gen").textContent = D.generated;
+
+// ---------- series helpers
+function raw(id) { const s = D.series[id]; return s ? s.data.map(([d, v]) => [new Date(d).getTime(), v]) : null; }
+function align(a, b, f) {
+  if (!a || !b) return null;
+  // match each point of a with the latest point of b on or before it
+  const out = []; let j = 0;
+  for (const [t, v] of a) { while (j + 1 < b.length && b[j + 1][0] <= t) j++; if (b[j] && b[j][0] <= t + 4 * 864e5) out.push([t, f(v, b[j][1])]); }
+  return out;
+}
+function get(spec) {
+  if (typeof spec === "string") return raw(spec);
+  if (spec.d === "ratio") return align(raw(spec.a), raw(spec.b), (x, y) => x / y);
+  if (spec.d === "mult") return align(raw(spec.a), raw(spec.b), (x, y) => x * y * (spec.k || 1));
+  if (spec.d === "diff") return align(raw(spec.a), raw(spec.b), (x, y) => x - y);
+  if (spec.d === "pts") return spec.pts;
+  return null;
+}
+function nameOf(spec) { return typeof spec === "string" ? (D.series[spec] ? D.series[spec].name : spec) : spec.name; }
+function srcOf(spec) { return typeof spec === "string" ? (D.series[spec] ? D.series[spec].source : "") : (spec.src || ""); }
+
+let RANGE = 10;
+const RANGES = [["1Y", 1], ["3Y", 3], ["5Y", 5], ["10Y", 10], ["20Y", 20], ["Max", 99]];
+function clip(pts, yrs) { if (!pts) return pts; const cut = Date.now() - yrs * 365.25 * 864e5; return pts.filter(p => p[0] >= cut); }
+function rangeBar() { return `<div class="ranges" role="group" aria-label="Time range">${RANGES.map(([l, y]) => `<button type="button" data-y="${y}" aria-pressed="${y === RANGE}">${l}</button>`).join("")}</div>`; }
+function rebase(pts) { if (!pts || !pts.length) return pts; const b = pts[0][1]; return pts.map(([t, v]) => [t, v / b * 100]); }
+
+// ---------- chart rendering
+const charts = [];
+function baseOpt() {
+  const ink = css("--muted"), grid = css("--grid");
+  return {
+    animation: false, textStyle: {fontFamily: "Inter, system-ui, sans-serif", color: ink},
+    grid: {left: 8, right: 14, top: 26, bottom: 4, containLabel: true},
+    tooltip: {trigger: "axis", backgroundColor: css("--card"), borderColor: css("--line"), textStyle: {color: css("--ink"), fontSize: 12},
+      axisPointer: {type: "line", lineStyle: {color: css("--faint"), width: 1}}, valueFormatter: v => smart(v)},
+    xAxis: {type: "time", axisLine: {lineStyle: {color: css("--line")}}, axisTick: {show: false}, axisLabel: {color: ink, fontSize: 11, hideOverlap: true}, splitLine: {show: false}},
+    yAxis: {type: "value", scale: true, axisLabel: {color: ink, fontSize: 11, formatter: v => smart(v)}, splitLine: {lineStyle: {color: grid}}},
+  };
+}
+const SCOL = ["--s1", "--s2", "--s3", "--s4"];
+function draw(card) {
+  const el = card.el; if (!el.offsetWidth) return;
+  let ch = echarts.getInstanceByDom(el) || echarts.init(el, null, {renderer: "canvas"});
+  if (!charts.includes(ch)) charts.push(ch);
+  const c = card.cfg, yrs = c.fixed || RANGE;
+  let series = c.s.map((spec, i) => {
+    let pts = clip(get(spec), yrs);
+    if (c.rebase) pts = rebase(pts);
+    const col = css(SCOL[i % 4]);
+    const kind = c.kind || "line";
+    const o = {name: nameOf(spec), type: kind === "area" ? "line" : kind, data: pts || [], showSymbol: false, symbolSize: 8,
+      lineStyle: {width: 2, color: col}, itemStyle: {color: col, borderRadius: kind === "bar" ? [4, 4, 0, 0] : 0}, emphasis: {focus: "series"}};
+    if (kind === "area") o.areaStyle = {color: col, opacity: .16};
+    if (kind === "bar") o.barMaxWidth = 14;
+    return o;
+  });
+  const opt = baseOpt();
+  if (c.s.length > 1) opt.legend = {top: 0, left: 0, itemWidth: 12, itemHeight: 3, icon: "rect", textStyle: {color: css("--muted"), fontSize: 11}};
+  else opt.grid.top = 10;
+  const ref = c.ref != null ? c.ref : (c.rebase ? 100 : null);
+  if (ref != null && series[0]) series[0].markLine = {silent: true, symbol: "none", label: {show: false}, lineStyle: {color: css("--faint"), type: "dashed", width: 1}, data: [{yAxis: ref}]};
+  if (c.kind === "bar" || c.kind === "area") opt.yAxis.scale = false; // bars and areas are read from zero
+  if (c.kind === "bar" && c.s.length === 1) {
+    series[0].itemStyle.color = p => p.value[1] < 0 ? css("--s3") : css("--s1");
+  }
+  opt.series = series;
+  ch.setOption(opt, true);
+}
+
+// ---------- card factory
+function card(cfg) {
+  const div = document.createElement("div");
+  div.className = "card" + (cfg.wide ? " wide" : "");
+  const first = get(cfg.s[0]);
+  let kv = "";
+  if (first && first.length && !cfg.rebase && cfg.s.length === 1) {
+    const last = first[first.length - 1], unit = typeof cfg.s[0] === "string" && D.series[cfg.s[0]] ? D.series[cfg.s[0]].unit : (cfg.s[0].unit || cfg.unit || "");
+    const yago = first.filter(p => p[0] <= last[0] - 365 * 864e5).pop();
+    let chip = "";
+    if (yago) {
+      const isRate = /%|pts|bp/.test(unit);
+      const ch = isRate ? last[1] - yago[1] : (last[1] / yago[1] - 1) * 100;
+      chip = `<span class="chip ${ch > 0 ? "up" : ch < 0 ? "down" : ""}">${ch > 0 ? "+" : ""}${fmt(ch, isRate ? 2 : 1)}${isRate ? " pts" : "%"} vs 1Y ago</span>`;
+    }
+    kv = `<div class="kv"><span class="v">${smart(last[1])}</span><span class="u">${unit} · ${new Date(last[0]).toLocaleDateString("en-GB", {day: "2-digit", month: "short", year: "numeric"})}</span>${chip}</div>`;
+  }
+  const srcs = [...new Set(cfg.s.map(srcOf).filter(Boolean))].join(", ");
+  div.innerHTML = `<h3>${cfg.t}</h3>${cfg.why ? `<p class="why">${cfg.why}</p>` : ""}${kv}<div class="chart" style="${cfg.h ? `height:${cfg.h}px` : ""}"></div><div class="src">Source: ${srcs}${cfg.rebase ? " · indexed to 100 at start of range" : ""}</div>`;
+  const obj = {el: div.querySelector(".chart"), cfg};
+  div._card = obj;
+  return div;
+}
+
+// ---------- tab definitions
+const R = (a, b, name, src = "Yahoo Finance (derived)") => ({d: "ratio", a, b, name, src});
+const TABS = [
+  {id: "snap", label: "Weekly snapshot"},
+  {id: "india", label: "India macro", lede: "Ritesh's anchor is nominal GDP: about 12% (7% real plus 5% inflation) is the best case for mid and small caps. Oil, the rupee and RBI rates are what can break it.", cards: [
+    {t: "India nominal vs real GDP growth", s: ["IN_GDP_NOM", "IN_GDP_REAL"], kind: "bar", why: "Nominal growth drives corporate revenue. Watch the gap to the 12% sweet spot.", ref: 12},
+    {t: "India CPI inflation", s: ["IN_CPI"], ref: 4, why: "RBI targets 4% (dashed). Above about 5% squeezes real growth and pushes the RBI to hike. Joined series: base 2024 from 2026, base 2012 from 2014, OECD index before."},
+    {t: "India CPI: food and beverages", s: ["IN_CPI_FOOD"], kind: "bar", why: "Food is the swing factor in Indian inflation. New 2024 base, so history starts in 2026."},
+    {t: "India WPI inflation", s: ["IN_WPI"], ref: 0, why: "Wholesale prices feed corporate margins and the GDP deflator."},
+    {t: "India IIP growth", s: ["IN_IIP", "IN_IIP_MFG"], kind: "line", why: "Industrial output. Manufacturing share of GDP is the long-term story."},
+    {t: "IIP: capital goods and infra goods", s: ["IN_IIP_CAPITALGOO", "IN_IIP_INFRASTRUC"], why: "The capex cycle in real time."},
+    {t: "Private and government consumption, investment (real growth)", s: ["IN_PFCE", "IN_GFCF", "IN_GFCE"], kind: "line", why: "GDP = consumption + investment + government + net exports."},
+    {t: "India investment rate (GFCF / GDP)", s: ["IN_GFCF_SHARE"], kind: "bar", why: "A rising investment rate is the reindustrialisation thesis showing up in the data."},
+    {t: "India 10Y government bond yield", s: ["INDIRLTLT01STM"], why: "Cost of capital. Rises when oil and inflation rise."},
+    {t: "USD/INR, long history", s: ["DEXINUS"], why: "Fed H.10 daily rate since 1973."},
+    {t: "USD/INR", s: ["Y:USDINR=X"], why: "If oil stays high and fuel prices are not raised, the rupee takes the hit."},
+    {t: "INR vs Chinese yuan (CNY/INR)", s: ["Y:CNYINR=X"], why: "Rising line = rupee weaker vs yuan, which makes Indian exports more competitive against China."},
+    {t: "Brent crude in rupees", s: [{d: "mult", a: "DCOILBRENTEU", b: "DEXINUS", name: "Brent (INR per barrel)", src: "FRED (derived)"}], why: "What India actually pays. Higher oil sucks liquidity from every other asset."},
+    {t: "India total reserves", s: ["IND_RES"], why: "Buffer against oil and capital-flow shocks."},
+    {t: "Nifty in US dollars", s: [R("Y:^NSEI", "Y:USDINR=X", "Nifty 50 in USD")], why: "How a foreign investor sees Indian equity returns."},
+  ]},
+  {id: "breadth", label: "India breadth", lede: "Nifty 500 participation, computed each week from daily prices. India is a bottom-up market, so breadth tells you more than the index."},
+  {id: "flows", label: "FII / DII flows"},
+  {id: "us", label: "US and liquidity", lede: "US nominal growth is about 7%, but outside AI the economy is hurting. Watch housing, delinquencies, debt and the liquidity the Fed and Treasury provide.", cards: [
+    {t: "US nominal vs real GDP growth", s: ["GDP", "GDPC1"], why: "Nominal growth matters for profits; real growth is the headline."},
+    {t: "US CPI and core PCE inflation", s: ["CPIAUCSL", "PCEPILFE"], ref: 2, why: "The Fed's 2% target is the dashed line."},
+    {t: "US unemployment rate", s: ["UNRATE"]},
+    {t: "US initial jobless claims", s: ["ICSA"], kind: "area", why: "Weekly, the fastest read on layoffs."},
+    {t: "US non-farm payrolls, monthly change", s: ["PAYEMS"], kind: "bar"},
+    {t: "US housing starts", s: ["HOUST"], why: "Ritesh flagged weak housing starts as a sign the non-AI economy is hurting."},
+    {t: "US consumer loan and credit card delinquency", s: ["DRCLACBS", "DRCCLACBS"], why: "Rising delinquencies (cars, cards) point to stress on the consumer."},
+    {t: "US federal debt to GDP", s: ["GFDEGDQ188S"], why: "About 125%. The way out is growth (productivity) or inflation."},
+    {t: "US federal deficit", s: ["FYFSGDA188S"], kind: "bar", why: "Negative = deficit. Bigger deficits mean more Treasury supply."},
+    {t: "US manufacturing share of GDP", s: ["VAPGDPMA"], why: "Under 10%. Reshoring aims to lift this, which needs grid and power."},
+    {t: "US net liquidity", s: ["NETLIQ"], kind: "area", why: "Fed balance sheet minus Treasury cash minus reverse repo. Markets tend to follow it."},
+    {t: "Fed balance sheet", s: ["WALCL"], kind: "area"},
+    {t: "US M2 money supply growth", s: ["M2SL"], ref: 0},
+    {t: "US industrial production growth", s: ["INDPRO"], ref: 0},
+  ]},
+  {id: "rates", label: "Rates and credit", lede: "\"I always look at fixed income spreads to tell me whether the macros are changing.\" Bond investors move first; equities react with a lag.", cards: [
+    {t: "US high-yield credit spread", s: ["BAMLH0A0HYM2"], kind: "area", why: "The main stress gauge. Sharp widening = trouble in the wonderland. FRED now only publishes 3 years of the ICE BofA spreads; the Moody's chart below has the long history."},
+    {t: "Corporate spreads, long history: Moody's Baa and Aaa minus 10Y", s: ["BAA10Y", "AAA10Y"], why: "Daily since 1986. Spikes mark every credit event: 1998, 2001, 2008, 2020."},
+    {t: "US CCC-and-below spread", s: ["BAMLH0A3HYC"], kind: "area", why: "The weakest borrowers crack first."},
+    {t: "US investment-grade spread", s: ["BAMLC0A0CM"], kind: "area"},
+    {t: "Emerging market corporate spread", s: ["BAMLEMCBPIOAS"], kind: "area", why: "EM debt has beaten DM debt over 10 years."},
+    {t: "US Treasury yields: 2Y, 10Y, 30Y", s: ["DGS2", "DGS10", "DGS30"]},
+    {t: "US yield curve (10Y minus 2Y)", s: ["T10Y2Y"], ref: 0, kind: "area", why: "Below zero = inverted."},
+    {t: "US 10Y real yield and breakeven inflation", s: ["DFII10", "T10YIE"], why: "Real yield is the true cost of money; breakeven is the market's inflation forecast."},
+    {t: "Fed funds rate", s: ["DFF"]},
+    {t: "France minus Germany 10Y spread", s: ["FRDE"], kind: "area", why: "France is the third-largest bond market. \"People don't take it seriously. They will all take it seriously on the same day.\""},
+    {t: "10Y yields: Japan, UK, Germany, France", s: ["IRLTLT01JPM156N", "IRLTLT01GBM156N", "IRLTLT01DEM156N", "IRLTLT01FRM156N"], why: "Rising global yields pull capital out of risk assets."},
+    {t: "MOVE index (bond volatility)", s: ["Y:^MOVE"], kind: "area"},
+    {t: "VIX (equity volatility)", s: ["Y:^VIX"], kind: "area"},
+    {t: "US 30Y mortgage rate", s: ["MORTGAGE30US"]},
+  ]},
+  {id: "fx", label: "Currencies", lede: "The old rule (strong dollar, every currency falls) is breaking. 55% of DXY is the euro, so also watch the yuan, yen and rupee separately.", cards: [
+    {t: "US Dollar Index (DXY)", s: ["Y:DX-Y.NYB"], why: "Mostly a euro story."},
+    {t: "Broad trade-weighted dollar (Fed)", s: ["DTWEXBGS"], why: "A wider basket than DXY, closer to the dollar's true strength."},
+    {t: "USD/CNY", s: ["Y:USDCNY=X"], why: "Falling line = yuan strengthening, which he sees as part of the de-dollarisation shift."},
+    {t: "USD/JPY", s: ["Y:USDJPY=X"]},
+    {t: "EUR/USD", s: ["Y:EURUSD=X"]},
+    {t: "USD/KRW", s: ["Y:USDKRW=X"], why: "Asian currencies outside China (ADXY proxy)."},
+    {t: "USD/INR", s: ["Y:USDINR=X"]},
+    {t: "JPY/INR", s: ["Y:JPYINR=X"]},
+    {t: "USD/BRL", s: ["Y:USDBRL=X"], why: "Latin America, his favourite region outside India."},
+  ]},
+  {id: "cmdty", label: "Energy and commodities", lede: "\"Higher oil prices always suck away the liquidity from every other asset class.\" Short term inflationary, long term deflationary.", cards: [
+    {t: "Brent and WTI crude (spot, long history)", s: ["DCOILBRENTEU", "DCOILWTICO"], why: "EIA spot prices since 1986-87, about a week behind futures."},
+    {t: "Brent and WTI futures", s: ["Y:BZ=F", "Y:CL=F"]},
+    {t: "US commercial crude inventories", s: ["WCESTUS1"], kind: "area", why: "Weekly EIA data. Low stocks leave no buffer if the war drags on."},
+    {t: "US Strategic Petroleum Reserve", s: ["WCSSTUS1"], kind: "area", why: "Drawdowns are close to the limit; the runway for releases is short."},
+    {t: "US natural gas", s: ["Y:NG=F"]},
+    {t: "Gold", s: ["Y:GC=F"], why: "Central banks buy regardless of price; retail is price-sensitive."},
+    {t: "Silver", s: ["Y:SI=F"]},
+    {t: "Gold / silver ratio", s: [R("Y:GC=F", "Y:SI=F", "Gold / silver")]},
+    {t: "Copper", s: ["Y:HG=F"], why: "Electrification and grid demand."},
+    {t: "Copper / gold ratio", s: [R("Y:HG=F", "Y:GC=F", "Copper / gold")], why: "Rising = growth optimism; falling = fear. Tracks bond yields closely."},
+    {t: "Uranium miners (URA)", s: ["Y:URA"], why: "Energy security and power for data centres."},
+    {t: "Wheat", s: ["Y:ZW=F"], why: "Food inflation and fertiliser route risk."},
+    {t: "Bitcoin", s: ["Y:BTC-USD"]},
+  ]},
+  {id: "gold", label: "Gold and reserves", lede: "Central banks, led by China and Russia, keep adding gold. Ritesh expects gold to drift back to being a government-to-government monetary asset."},
+  {id: "global", label: "Global and AI", lede: "The US is 30% of world GDP but about 64% of world market cap, and AI is carrying it. If the AI trade deflates, money moves to the rest of the world.", cards: [
+    {t: "MSCI ACWI vs S&P 500", s: [R("Y:ACWI", "Y:^GSPC", "ACWI / S&P 500")], why: "Rising = rest of the world outperforming. He says this has started.", },
+    {t: "Equal-weight vs cap-weight S&P 500", s: [R("Y:RSP", "Y:^GSPC", "RSP / S&P 500")], why: "Falling = concentration in a few mega caps. 8 stocks are about 45% of the S&P."},
+    {t: "Emerging markets vs ACWI", s: [R("Y:EEM", "Y:ACWI", "EEM / ACWI")]},
+    {t: "India vs emerging markets (USD)", s: [R("Y:INDA", "Y:EEM", "INDA / EEM")]},
+    {t: "Apple vs semiconductors", s: [R("Y:AAPL", "Y:SMH", "AAPL / SMH")], why: "Apple sat out the AI build-out; it trades opposite to semis. A rising line = AI trade cooling."},
+    {t: "CoreWeave", s: ["Y:CRWV"], why: "The neocloud flag-bearer. Its bond yield went from about 9% to 15 to 16%; the stock is the public read."},
+    {t: "Hyperscalers, rebased", s: ["Y:MSFT", "Y:GOOGL", "Y:AMZN", "Y:META"], rebase: true, why: "Buybacks have stopped and free cash flow has turned negative as capex rises."},
+    {t: "Nvidia and semiconductors, rebased", s: ["Y:NVDA", "Y:SMH", "Y:ORCL"], rebase: true},
+    {t: "Major indices, rebased", s: ["Y:^GSPC", "Y:^NSEI", "Y:^N225", "Y:^HSI"], rebase: true, why: "Local currency."},
+    {t: "Latin America (USD ETFs), rebased", s: ["Y:EWZ", "Y:ECH", "Y:EPU", "Y:ARGT"], rebase: true, why: "High positive real rates, resources, market reforms. His top region outside India."},
+    {t: "Small caps vs large caps: Russell 2000 / S&P 500", s: [R("Y:^RUT", "Y:^GSPC", "Russell 2000 / S&P 500")]},
+    {t: "Korea (KOSPI)", s: ["Y:^KS11"]},
+  ]},
+  {id: "watch", label: "Events and themes"},
+];
+
+// ---------- special panels
+function snapPanel(p) {
+  const ins = D.insights.map(i => `<div class="ins"><span class="tag">${i.tag}</span><div>${i.text}</div></div>`).join("");
+  p.innerHTML = `<div class="bar"><div><h2>This week</h2><p class="lede">What moved and what is stretched. These are observations from the data, not buy or sell calls.</p></div></div>
+  <div class="insights">${ins}</div><h4 class="sec">Ritesh's checklist</h4><div class="checks" id="checks"></div>
+  <h4 class="sec">Weekly snapshot</h4><div class="tw"><table id="snapT"></table></div>`;
+  $("#checks", p).innerHTML = checklist().map(c => `<div class="chk"><div class="name">${c.name}</div><div class="state ${c.s}">${c.s === "good" ? "&#9679;" : c.s === "warn" ? "&#9650;" : "&#9632;"} ${c.label}</div><div class="det">${c.det}</div></div>`).join("");
+  const unit = k => k === "pct" ? "%" : k === "bp" ? " bp" : "";
+  const cell = (v, k) => v == null ? `<td>n/a</td>` : `<td class="${v > 0 ? "up" : v < 0 ? "down" : ""}">${v > 0 ? "+" : ""}${fmt(v, k === "bp" ? 0 : 1)}${unit(k)}</td>`;
+  let h = `<thead><tr><th>Indicator</th><th>Last</th><th>1W</th><th>1M</th><th>3M</th><th>YTD</th><th>1Y</th><th>52W range</th><th>26W trend</th></tr></thead><tbody>`;
+  for (const g of D.snapshot) {
+    h += `<tr class="grp"><td colspan="9">${g.group}</td></tr>`;
+    for (const r of g.rows) {
+      h += `<tr><td>${r.label}</td><td>${smart(r.last)}</td>${cell(r.w1, r.kind)}${cell(r.m1, r.kind)}${cell(r.m3, r.kind)}${cell(r.ytd, r.kind)}${cell(r.y1, r.kind)}
+      <td><span class="rng" title="${r.pos52}% of 52-week range"><i style="left:calc(${r.pos52 || 0}% - 2px)"></i></span></td><td>${spark(r.spark)}</td></tr>`;
+    }
+  }
+  $("#snapT", p).innerHTML = h + "</tbody>";
+}
+function spark(v) {
+  v = (v || []).filter(x => x != null); if (v.length < 2) return "";
+  const mn = Math.min(...v), mx = Math.max(...v), w = 90, hh = 22;
+  const pts = v.map((x, i) => `${(i / (v.length - 1) * w).toFixed(1)},${(hh - 2 - (mx > mn ? (x - mn) / (mx - mn) : .5) * (hh - 4)).toFixed(1)}`).join(" ");
+  return `<svg class="spark" width="${w}" height="${hh}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${css("--s1")}" stroke-width="1.5"/></svg>`;
+}
+function lastOf(spec) { const p = get(spec); return p && p.length ? p[p.length - 1][1] : null; }
+function chg(spec, weeks, pct = true) {
+  const p = get(spec); if (!p || !p.length) return null;
+  const l = p[p.length - 1], o = p.filter(x => x[0] <= l[0] - weeks * 7 * 864e5).pop();
+  if (!o) return null; return pct ? (l[1] / o[1] - 1) * 100 : l[1] - o[1];
+}
+function checklist() {
+  const out = [];
+  const hy = get("BAMLH0A0HYM2");
+  if (hy) {
+    const y = hy.filter(p => p[0] > hy[hy.length - 1][0] - 365 * 864e5).map(p => p[1]);
+    const w = (hy[hy.length - 1][1] - Math.min(...y)) * 100;
+    out.push({name: "Credit stress (US high-yield spread)", s: w > 100 ? "bad" : w > 50 ? "warn" : "good", label: w > 100 ? "Stress building" : w > 50 ? "Watch" : "Calm", det: `${fmt(hy[hy.length - 1][1] * 100, 0)} bp, ${fmt(w, 0)} bp above 12-month low`});
+  }
+  const mv = lastOf("Y:^MOVE");
+  if (mv != null) out.push({name: "Bond volatility (MOVE)", s: mv > 120 ? "bad" : mv > 100 ? "warn" : "good", label: mv > 120 ? "High" : mv > 100 ? "Elevated" : "Normal", det: `MOVE at ${fmt(mv, 0)}`});
+  const cw = get("Y:CRWV"), sm = chg("Y:SMH", 13);
+  if (cw) {
+    const dd = (cw[cw.length - 1][1] / Math.max(...cw.map(p => p[1])) - 1) * 100;
+    out.push({name: "AI cycle (CoreWeave drawdown, SMH 3M)", s: dd < -50 ? "bad" : dd < -25 ? "warn" : "good", label: dd < -50 ? "Deflating" : dd < -25 ? "Cracks" : "Intact", det: `CoreWeave ${fmt(dd, 0)}% from peak; SMH ${sm == null ? "n/a" : (sm > 0 ? "+" : "") + fmt(sm, 1) + "%"} in 3 months`});
+  }
+  const bi = chg({d: "mult", a: "Y:BZ=F", b: "Y:USDINR=X"}, 13);
+  if (bi != null) out.push({name: "Oil pressure on India (Brent in INR, 3M)", s: bi > 15 ? "bad" : bi > 5 ? "warn" : "good", label: bi > 15 ? "Heavy" : bi > 5 ? "Rising" : "Easing", det: `${bi > 0 ? "+" : ""}${fmt(bi, 1)}% in 13 weeks; Brent $${fmt(lastOf("Y:BZ=F"), 1)}`});
+  const aw = chg({d: "ratio", a: "Y:ACWI", b: "Y:^GSPC"}, 26);
+  if (aw != null) out.push({name: "World vs US (ACWI / S&P 500, 6M)", s: aw > 0 ? "good" : "warn", label: aw > 0 ? "World leading" : "US leading", det: `${aw > 0 ? "+" : ""}${fmt(aw, 1)}% relative over 26 weeks`});
+  const dx = chg("Y:DX-Y.NYB", 13);
+  if (dx != null) out.push({name: "Dollar (DXY, 3M)", s: dx > 3 ? "bad" : dx < -3 ? "good" : "warn", label: dx > 3 ? "Strengthening" : dx < -3 ? "Weakening" : "Range-bound", det: `${dx > 0 ? "+" : ""}${fmt(dx, 1)}% in 13 weeks; a weaker dollar helps EM flows`});
+  const cv = lastOf("T10Y2Y");
+  if (cv != null) out.push({name: "US yield curve (10Y minus 2Y)", s: cv < 0 ? "bad" : cv < 0.5 ? "warn" : "good", label: cv < 0 ? "Inverted" : cv < 0.5 ? "Flat" : "Normal", det: `${fmt(cv * 100, 0)} bp`});
+  const nl = chg("NETLIQ", 13);
+  if (nl != null) out.push({name: "US net liquidity (3M)", s: nl < -3 ? "bad" : nl > 3 ? "good" : "warn", label: nl < -3 ? "Draining" : nl > 3 ? "Adding" : "Flat", det: `${nl > 0 ? "+" : ""}${fmt(nl, 1)}% in 13 weeks`});
+  const br = D.breadth;
+  if (br && br.above200) {
+    const a = br.above200.filter(v => v != null).pop();
+    out.push({name: "India breadth (Nifty 500 above 200-DMA)", s: a > 60 ? "good" : a > 40 ? "warn" : "bad", label: a > 60 ? "Healthy" : a > 40 ? "Mixed" : "Weak", det: `${fmt(a, 0)}% of stocks`});
+  }
+  const ng = lastOf("IN_GDP_NOM");
+  if (ng != null) out.push({name: "India nominal GDP vs 12% sweet spot", s: ng >= 11 ? "good" : ng >= 9 ? "warn" : "bad", label: ng >= 11 ? "On track" : ng >= 9 ? "Below" : "Weak", det: `${fmt(ng, 1)}% YoY, latest quarter`});
+  const cpi = lastOf("IN_CPI");
+  if (cpi != null) out.push({name: "India inflation vs 5% comfort", s: cpi > 6 ? "bad" : cpi > 5 ? "warn" : "good", label: cpi > 6 ? "High" : cpi > 5 ? "Above comfort" : "Comfortable", det: `CPI ${fmt(cpi, 2)}%${D.repo ? `; repo rate ${fmt(D.repo, 2)}%` : ""}`});
+  return out;
+}
+function breadthPanel(p) {
+  const b = D.breadth;
+  if (!b) { p.innerHTML = `<p class="lede">Breadth data was not available in this run.</p>`; return; }
+  const ts = b.dates.map(d => new Date(d).getTime());
+  const P = k => ({d: "pts", pts: ts.map((t, i) => [t, b[k][i]]).filter(x => x[1] != null), name: {above20: "% above 20-day EMA", above50: "% above 50-day SMA", above200: "% above 200-day SMA", high52: "New 52-week highs", low52: "New 52-week lows", turnover_cr: "Turnover (INR cr)"}[k] || k, unit: k.startsWith("above") ? "% of stocks" : k === "turnover_cr" ? "INR cr" : "stocks", src: "NSE list, Yahoo prices (computed)"});
+  const net = {d: "pts", pts: ts.map((t, i) => [t, b.adv[i] - b.dec[i]]), name: "Advances minus declines", src: "computed"};
+  const a40 = {d: "pts", pts: b.above40w.map(([d, v]) => [new Date(d).getTime(), v]), name: "% above 40-week EMA", unit: "% of stocks", src: "computed"};
+  p.innerHTML = `<div class="bar"><div><h2>India breadth</h2><p class="lede">${TABS.find(t => t.id === "breadth").lede} Universe: today's ${b.universe} Nifty 500 stocks, so earlier years only count the ones that were listed then (survivorship bias). Daily for the last 3 years, weekly before.</p></div>${rangeBar()}</div><div class="grid" id="bg"></div>
+  <h4 class="sec">Industries above key weekly EMAs (% of stocks)</h4><div class="tw"><table id="secT"></table></div>`;
+  const g = $("#bg", p);
+  [{t: "% of stocks above 20-day EMA", s: [P("above20")], kind: "area", ref: 50, why: "Short-term participation. Above 80 is stretched, below 20 is washed out."},
+   {t: "% of stocks above 50-day SMA", s: [P("above50")], kind: "area", ref: 50},
+   {t: "% of stocks above 200-day SMA", s: [P("above200")], kind: "area", ref: 50, why: "Long-term health of the broad market."},
+   {t: "% of stocks above 40-week EMA", s: [a40], kind: "area", ref: 50},
+   {t: "New 52-week highs vs lows", s: [P("high52"), P("low52")], why: "Bullishness vs bearishness count, daily."},
+   {t: "Advances minus declines", s: [net], kind: "bar"},
+   {t: "Nifty 500 cash turnover", s: [P("turnover_cr")], kind: "bar", why: "Approximate traded value of Nifty 500 stocks."},
+  ].forEach(c => g.appendChild(card(c)));
+  const cols = ["4w", "20w", "30w", "40w", "52w"];
+  const heat = v => `background:color-mix(in srgb, var(--heat1) ${Math.round(v * .55)}%, var(--heat0))`;
+  let h = `<thead><tr><th>Industry</th><th>Stocks</th>${cols.map(c => `<th>Above ${c} EMA</th>`).join("")}<th>Median 4W</th><th>Median 13W</th></tr></thead><tbody>`;
+  h += b.sectors.map(r => `<tr><td>${r.sector}</td><td>${r.n}</td>${cols.map(c => `<td style="${heat(r[c])}">${fmt(r[c], 0)}%</td>`).join("")}<td class="${r.ret4w > 0 ? "up" : "down"}">${fmt(r.ret4w, 1)}%</td><td class="${r.ret13w > 0 ? "up" : "down"}">${fmt(r.ret13w, 1)}%</td></tr>`).join("");
+  $("#secT", p).innerHTML = h + "</tbody>";
+  sortable($("#secT", p));
+}
+function flowsPanel(p) {
+  const f = D.flows || [];
+  const days = [...new Set(f.map(r => r.date))].sort();
+  const byCat = c => ({d: "pts", pts: days.map(d => { const r = f.find(x => x.date === d && x.category === c); return [new Date(d).getTime(), r ? r.net : null]; }).filter(x => x[1] != null), name: c + " net (INR cr)", src: "NSE"});
+  p.innerHTML = `<div class="bar"><div><h2>FII / DII flows</h2><p class="lede">Cash-market net buying by foreign and domestic institutions. NSE publishes only the latest day, so this history builds up one session at a time from 23 Oct 2026 as the site refreshes each weekday. FII selling has been concentrated in large IT, banks and oil and gas, while their holdings spread to more mid and small caps.</p></div></div><div class="grid" id="fg"></div>
+  <h4 class="sec">Recorded sessions</h4><div class="tw"><table id="fT"></table></div>`;
+  const g = $("#fg", p);
+  g.appendChild(card({t: "FII and DII net flows", s: [byCat("FII"), byCat("DII")], kind: "bar", fixed: 99, wide: true, unit: "INR cr"}));
+  let h = `<thead><tr><th>Date</th><th>FII buy</th><th>FII sell</th><th>FII net</th><th>DII buy</th><th>DII sell</th><th>DII net</th></tr></thead><tbody>`;
+  for (const d of days.slice().reverse()) {
+    const a = f.find(x => x.date === d && x.category === "FII") || {}, b = f.find(x => x.date === d && x.category === "DII") || {};
+    h += `<tr><td>${d}</td><td>${fmt(a.buy, 0)}</td><td>${fmt(a.sell, 0)}</td><td class="${a.net > 0 ? "up" : "down"}">${fmt(a.net, 0)}</td><td>${fmt(b.buy, 0)}</td><td>${fmt(b.sell, 0)}</td><td class="${b.net > 0 ? "up" : "down"}">${fmt(b.net, 0)}</td></tr>`;
+  }
+  $("#fT", p).innerHTML = h + "</tbody>";
+}
+function goldPanel(p) {
+  const g = D.gold;
+  if (!g) { p.innerHTML = `<p class="lede">IMF reserve data was not available in this run.</p>`; return; }
+  p.innerHTML = `<div class="bar"><div><h2>Gold and reserves</h2><p class="lede">${TABS.find(t => t.id === "gold").lede} Gold value and share use today's gold price on IMF-reported tonnes.</p></div></div><div class="grid" id="gg"></div>
+  <h4 class="sec">Central bank gold holdings by country (IMF IRFCL, monthly)</h4><div class="tw"><table id="gT"></table></div>`;
+  const top = ["CHN", "RUS", "IND", "TUR", "POL"].filter(c => g.history[c]);
+  const H = c => ({d: "pts", pts: g.history[c].map(([d, v]) => [new Date(d).getTime(), v]), name: (g.table.find(x => x.code === c) || {}).country + " (tonnes)", src: "IMF IRFCL"});
+  const gg = $("#gg", p);
+  gg.appendChild(card({t: "Gold holdings: China, Russia, India", s: top.slice(0, 3).map(H), why: "China and Russia are the steady accumulators; India has been adding too."}));
+  gg.appendChild(card({t: "Gold holdings: Turkiye, Poland", s: top.slice(3).map(H), why: "Two of the most active buyers of recent years."}));
+  const buyers = g.table.filter(x => x.chg12m != null).sort((a, b) => b.chg12m - a.chg12m).slice(0, 12);
+  const bc = document.createElement("div"); bc.className = "card";
+  bc.innerHTML = `<h3>Largest 12-month changes in gold holdings (tonnes)</h3><p class="why">Positive = buying, negative = selling.</p><div class="chart" style="height:300px"></div><div class="src">Source: IMF IRFCL</div>`;
+  bc._card = {el: bc.querySelector(".chart"), cfg: {}, custom: el => {
+    const ch = echarts.getInstanceByDom(el) || echarts.init(el); if (!charts.includes(ch)) charts.push(ch);
+    const all = g.table.filter(x => x.chg12m != null).sort((a, b) => Math.abs(b.chg12m) - Math.abs(a.chg12m)).slice(0, 12).sort((a, b) => a.chg12m - b.chg12m);
+    const o = baseOpt(); o.grid.top = 6; o.tooltip.trigger = "item";
+    o.xAxis = {type: "value", axisLabel: {color: css("--muted"), fontSize: 11}, splitLine: {lineStyle: {color: css("--grid")}}};
+    o.yAxis = {type: "category", data: all.map(x => x.country), axisLabel: {color: css("--muted"), fontSize: 11}, axisTick: {show: false}, axisLine: {lineStyle: {color: css("--line")}}};
+    o.series = [{type: "bar", barMaxWidth: 14, data: all.map(x => ({value: x.chg12m, itemStyle: {color: x.chg12m < 0 ? css("--s3") : css("--s1"), borderRadius: x.chg12m < 0 ? [4, 0, 0, 4] : [0, 4, 4, 0]}})), label: {show: true, position: "right", color: css("--muted"), fontSize: 11, formatter: q => fmt(q.value, 0)}}];
+    ch.setOption(o, true);
+  }};
+  gg.appendChild(bc);
+  gg.appendChild(card({t: "Gold price (USD/oz)", s: ["Y:GC=F"]}));
+  let h = `<thead><tr><th>Country</th><th>As of</th><th>Tonnes</th><th>12M change (t)</th><th>5Y change (t)</th><th>Gold value (USD bn)</th><th>Total reserves (USD bn)</th><th>Gold share of reserves</th></tr></thead><tbody>`;
+  const c = v => v == null ? "<td>n/a</td>" : `<td class="${v > 0 ? "up" : v < 0 ? "down" : ""}">${v > 0 ? "+" : ""}${fmt(v, 1)}</td>`;
+  h += g.table.map(r => `<tr><td>${r.country}</td><td>${r.asof}</td><td>${fmt(r.tonnes, 1)}</td>${c(r.chg12m)}${c(r.chg5y)}<td>${fmt(r.gold_value_bn, 1)}</td><td>${fmt(r.reserves_bn, 1)}</td><td>${r.gold_share == null ? "n/a" : fmt(r.gold_share, 1) + "%"}</td></tr>`).join("");
+  $("#gT", p).innerHTML = h + "</tbody>";
+  sortable($("#gT", p));
+}
+function watchPanel(p) {
+  const e = D.events || {};
+  p.innerHTML = `<div class="bar"><div><h2>Events and themes</h2><p class="lede">From the SOIC podcast (21 Oct 2026). Edit <code>data/events.json</code> to keep this list current.</p></div></div>
+  <h4 class="sec">Events to watch</h4><div class="list">${(e.events || []).map(x => `<div class="ev"><div class="d">${x.date}</div><div class="w">${x.what} <span class="chip">${x.region}</span></div><div class="y">${x.why}</div></div>`).join("")}</div>
+  <h4 class="sec">Long-term themes he is tracking</h4><div class="list">${(e.themes || []).map(x => `<div class="ev"><div class="d">Theme</div><div class="w">${x.name}</div><div class="y">${x.note}</div></div>`).join("")}</div>
+  <h4 class="sec">How he reads macro</h4><div class="list">
+    <div class="ev"><div class="d">1</div><div class="w">Use nominal GDP, not real</div><div class="y">Real GDP has no meaning for corporate profitability. US runs about 7% nominal, India about 12%.</div></div>
+    <div class="ev"><div class="d">2</div><div class="w">Bonds first</div><div class="y">Credit spreads, CDS and corporate bond yields flag trouble before equities do.</div></div>
+    <div class="ev"><div class="d">3</div><div class="w">Think like the government</div><div class="y">Indebted governments want growth, reshoring, energy security and lower healthcare costs. Policy follows incentives.</div></div>
+    <div class="ev"><div class="d">4</div><div class="w">Old correlations are breaking</div><div class="y">A strong DXY no longer means every currency falls; the US no longer wants to be the hegemon.</div></div>
+    <div class="ev"><div class="d">5</div><div class="w">India is bottom-up, the US is top-down</div><div class="y">At 12% nominal growth, tomorrow's winners sit outside today's benchmarks.</div></div>
+  </div>`;
+}
+function sortable(t) {
+  t.querySelectorAll("th").forEach((th, i) => th.addEventListener("click", () => {
+    const tb = t.tBodies[0], rows = [...tb.rows], dir = th.dataset.dir === "d" ? 1 : -1;
+    th.dataset.dir = dir === 1 ? "a" : "d";
+    const val = r => { const s = r.cells[i].textContent.replace(/[,%+]/g, ""); const n = parseFloat(s); return isNaN(n) ? s : n; };
+    rows.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * dir; });
+    rows.forEach(r => tb.appendChild(r));
+  }));
+}
+
+// ---------- layout
+const panels = {};
+function build() {
+  const nav = $("#tabs"), main = $("#main");
+  for (const t of TABS) {
+    const b = document.createElement("button");
+    b.className = "tab"; b.textContent = t.label; b.setAttribute("role", "tab"); b.dataset.id = t.id;
+    b.onclick = () => show(t.id); nav.appendChild(b);
+    const p = document.createElement("section"); p.className = "panel"; p.id = "p-" + t.id; main.appendChild(p); panels[t.id] = p;
+    if (t.cards) {
+      p.innerHTML = `<div class="bar"><div><h2>${t.label}</h2>${t.lede ? `<p class="lede">${t.lede}</p>` : ""}</div>${rangeBar()}</div><div class="grid"></div>`;
+      const g = $(".grid", p);
+      t.cards.forEach(c => { if (c.s.every(s => get(s) && get(s).length)) g.appendChild(card(c)); });
+    }
+  }
+  snapPanel(panels.snap); breadthPanel(panels.breadth); flowsPanel(panels.flows); goldPanel(panels.gold); watchPanel(panels.watch);
+  document.querySelectorAll(".ranges button").forEach(b => b.onclick = () => {
+    RANGE = +b.dataset.y;
+    document.querySelectorAll(".ranges button").forEach(x => x.setAttribute("aria-pressed", +x.dataset.y === RANGE));
+    redraw();
+  });
+  const start = (location.hash || "#snap").slice(1);
+  show(TABS.some(t => t.id === start) ? start : "snap");
+}
+let current = "snap";
+function show(id) {
+  current = id;
+  document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", b.dataset.id === id));
+  Object.entries(panels).forEach(([k, p]) => p.classList.toggle("on", k === id));
+  history.replaceState(null, "", "#" + id);
+  redraw();
+}
+function redraw() {
+  panels[current].querySelectorAll(".card").forEach(c => { if (!c._card) return; c._card.custom ? c._card.custom(c._card.el) : draw(c._card); });
+}
+window.addEventListener("resize", () => charts.forEach(c => c.resize()));
+$("#themeBtn").onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("ml-theme", document.documentElement.dataset.theme); } catch (e) {}
+  snapPanel(panels.snap); redraw();
+};
+try { const t = localStorage.getItem("ml-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+build();
+</script>
+</body>
+</html>
