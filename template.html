@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Macro Lens</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
 <style>
 :root{
@@ -117,11 +117,67 @@ td.up{color:var(--up)}td.down{color:var(--down)}
   main{padding:12px 16px}.stamp{text-align:left}.ev{grid-template-columns:1fr}.ev .y{grid-column:1}
   .insights,.checks{grid-template-columns:1fr}
 }
+
+/* ===== Pratham Gupta dashboard skin (matches Sector Rotation / market-dashboards hub) ===== */
+html:root,html:root[data-theme],html:root[data-theme="light"],html:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#030806;--card:#0A1713;--ink:#EEF5F2;--head:#FFFFFF;--muted:rgba(238,245,242,.66);--faint:rgba(238,245,242,.46);
+  --line:#16302A;--grid:rgba(47,227,181,.07);--tint:rgba(47,227,181,.08);--tintline:#21443A;
+  --brand:#6EE7B7;--brand-deep:#A7F3D0;--cta:#2FE3B5;
+  --s1:#2FE3B5;--s2:#E0A64A;--s3:#FF5C6C;--s4:#8EC3A9;
+  --up:#2FE3B5;--down:#FF5C6C;
+  --good-bg:rgba(47,227,181,.10);--good-ink:#6EE7B7;--warn-bg:rgba(224,166,74,.12);--warn-ink:#E0A64A;--bad-bg:rgba(255,92,108,.12);--bad-ink:#FF8A96;
+  --heat0:#0A1713;--heat1:#10B981;
+}
+body{background:#030806}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(900px 520px at 12% 108%,rgba(5,150,105,.30),transparent 70%),radial-gradient(700px 420px at 100% -10%,rgba(47,227,181,.10),transparent 70%),
+  linear-gradient(rgba(47,227,181,.035) 1px,transparent 1px) 0 0/72px 72px,linear-gradient(90deg,rgba(47,227,181,.035) 1px,transparent 1px) 0 0/72px 72px,#030806}
+::selection{background:rgba(47,227,181,.3)}
+.theme-btn{display:none!important}
+.hero{background:transparent;padding:16px 24px 18px;color:var(--ink)}
+.pg-top{max-width:1440px;margin:0 auto 18px;display:flex;align-items:center;gap:14px}
+.pg-back{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid #21443A;border-radius:999px;padding:5px 11px;transition:all .2s;white-space:nowrap}
+.pg-back:hover{color:#2FE3B5;border-color:#2FE3B5}
+.pg-me{display:flex;align-items:center;gap:10px}
+.pg-me img{width:36px;height:36px;border-radius:50%;border:2px solid #2FE3B5;object-fit:cover}
+.pg-me b{display:block;font-size:15.5px;color:#fff}.pg-me small{font-size:12px;color:#2FE3B5}
+.hero .eb{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#2FE3B5}
+.hero h1{font-size:clamp(28px,3.6vw,42px);font-weight:700;letter-spacing:-.02em;line-height:1.08;margin-top:6px}
+.hero h1 em{font-style:normal;background:linear-gradient(90deg,#2FE3B5,#6EE7B7 60%,#C8FFE9);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{color:var(--muted);max-width:760px}
+.stamp{color:var(--muted)}.stamp b{color:#fff}
+.hero-in{animation:pg-rise .6s ease both}
+nav{background:rgba(3,8,6,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.tab{background:#0A1713;border-color:#16302A;transition:all .18s ease}
+.tab:hover{transform:translateY(-1px);border-color:#2f5c4f}
+.tab[aria-selected="true"]{background:linear-gradient(135deg,#2FE3B5,#10B981);border-color:transparent;color:#03140E;font-weight:600;box-shadow:0 4px 16px rgba(47,227,181,.22)}
+.ranges{background:#0A1713;border-color:#16302A}
+.ranges button[aria-pressed="true"]{background:linear-gradient(135deg,#2FE3B5,#10B981);color:#03140E;font-weight:600}
+.bar h2{font-weight:700;letter-spacing:-.015em}
+.card,.ins,.chk,.tw{background:linear-gradient(170deg,#0E1F19,#0A1713 60%);border-color:#16302A}
+.card{border-radius:16px;transition:transform .22s cubic-bezier(.2,.8,.2,1),border-color .22s,box-shadow .22s;animation:pg-rise .55s cubic-bezier(.2,.8,.2,1) both}
+.card:hover{transform:translateY(-3px);border-color:rgba(47,227,181,.5);box-shadow:0 18px 40px -20px rgba(47,227,181,.35)}
+.card h3{font-weight:600}
+.grid>.card:nth-child(2){animation-delay:.05s}.grid>.card:nth-child(3){animation-delay:.1s}.grid>.card:nth-child(4){animation-delay:.15s}.grid>.card:nth-child(n+5){animation-delay:.2s}
+.kv .v{font-weight:700}
+.ins{border-left:3px solid #2FE3B5}
+.ins .tag{color:#2FE3B5;background:rgba(47,227,181,.10)}
+th{background:#08130F}
+tr.grp td{background:rgba(47,227,181,.07);color:#6EE7B7}
+tbody tr:hover td{background:rgba(47,227,181,.05)}
+h4.sec{color:#2FE3B5}
+@keyframes pg-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:640px){.pg-back{display:none}}
 </style>
 </head>
 <body>
-<header class="hero"><div class="hero-in">
-  <div><h1>Macro Lens</h1><p>India and global macro in one place, refreshed every weekday evening. Framework: track nominal growth, read the bond market first, follow government incentives.</p></div>
+<header class="hero">
+<div class="pg-top"><a class="pg-back" href="https://prathamgupta9004-lab.github.io/market-dashboards/">← All dashboards</a>
+  <div class="pg-me"><img src="https://prathamgupta9004-lab.github.io/market-dashboards/assets/pratham.webp" alt="" onerror="this.remove()"><div><b>Macro Lens</b><small>Pratham Gupta · @imprathamgupta</small></div></div></div>
+<div class="hero-in">
+  <div><div class="eb">India + global macro · refreshed every weekday</div><h1>The macro backdrop, <em>read in one place.</em></h1><p>India and global macro in one place, refreshed every weekday evening. Framework: track nominal growth, read the bond market first, follow government incentives.</p></div>
   <div class="stamp">Data as of <b id="gen"></b><br><button class="theme-btn" id="themeBtn" type="button">Toggle theme</button></div>
 </div></header>
 <nav><div class="nav-in" id="tabs" role="tablist"></div></nav>
